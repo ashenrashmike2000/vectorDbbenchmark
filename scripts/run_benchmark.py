@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--runs", "-r", type=int, default=5, help="Number of runs")
     parser.add_argument("--all", action="store_true", help="Run all enabled databases/datasets")
     parser.add_argument("--export", nargs="+", choices=["json", "csv", "latex", "plots"],
-                       default=["json"], help="Export formats")
+                        default=["json"], help="Export formats")
 
     args = parser.parse_args()
 
@@ -55,8 +55,23 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if "json" in args.export:
-        JSONExporter().export(results, str(output_dir / "results.json"))
-        print(f"Exported JSON to {output_dir / 'results.json'}")
+        # User requested specific format: results/<db>/<dataset>_<db>_results.json
+        for result in results:
+            # Determine database and dataset names safely
+            db_name = result.database_info.name if result.database_info else "unknown"
+            dataset_name = result.dataset_info.name
+
+            # Create specific directory: results/<database_name>
+            target_dir = output_dir / db_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # Construct filename: <dataset>_<database>_results.json
+            filename = f"{dataset_name}_{db_name}_results.json"
+            target_path = target_dir / filename
+
+            # Export individually
+            JSONExporter().export([result], str(target_path))
+            print(f"Exported JSON to {target_path}")
 
     if "csv" in args.export:
         CSVExporter().export(results, str(output_dir / "results.csv"))

@@ -125,9 +125,12 @@ class BenchmarkRunner:
         db_config = self.config.get_database_config(db_name)
         configs_to_test = self._get_index_configs(db_config, index_configs)
 
+        # FIXED: Instantiate temporary DB to get correct info for metadata
+        temp_db = get_database(db_name, db_config)
+
         result = BenchmarkResult(
             experiment_name=f"{db_name}_{dataset.name}",
-            database_info=None,
+            database_info=temp_db.info,  # FIXED: Populate database info
             dataset_info=dataset.info,
             hardware_info=self.hardware_info,
         )
