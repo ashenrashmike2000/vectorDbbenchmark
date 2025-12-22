@@ -1,5 +1,5 @@
 # =============================================================================
-# MS MARCO Dataset Configuration
+# MS MARCO Dataset Configuration (FIXED - with subset support)
 # =============================================================================
 # Microsoft Machine Reading Comprehension passage embeddings
 # Source: https://microsoft.github.io/msmarco/
@@ -8,18 +8,36 @@
 dataset:
   name: "msmarco"
   display_name: "MS MARCO"
-  description: "8.8M passage embeddings from MS MARCO"
+  description: "MS MARCO passage embeddings (configurable subset)"
   type: "text_embeddings"
 
 # -----------------------------------------------------------------------------
-# Data Specifications
+# Data Specifications - DEFAULT TO SMALL SUBSET FOR TESTING
 # -----------------------------------------------------------------------------
 specs:
-  num_vectors: 8841823
-  num_queries: 6980  # Dev set queries
+  # Full dataset size (for reference)
+  full_size: 8841823
+
+  # ACTUAL SIZE TO USE (configurable)
+  num_vectors: 100000  # Start with 100K for testing
+  num_queries: 1000    # Reduced for faster testing
   dimensions: 768
   data_type: "float32"
   ground_truth_k: 100
+
+# -----------------------------------------------------------------------------
+# Subset Configuration
+# -----------------------------------------------------------------------------
+# Control how many passages to use
+subset_size: 100000  # 100K passages (~10 minutes to generate embeddings)
+
+# Preset subset sizes for different use cases
+presets:
+  tiny: 10000      # ~1 minute - quick testing
+  small: 50000     # ~5 minutes - basic benchmarking
+  medium: 100000   # ~10 minutes - default
+  large: 500000    # ~50 minutes - more thorough
+  full: 8841823    # ~7+ hours - production
 
 # -----------------------------------------------------------------------------
 # Distance Metric
@@ -32,115 +50,73 @@ distance:
 # Download Configuration
 # -----------------------------------------------------------------------------
 download:
-  source: "huggingface"
-  base_url: "https://huggingface.co/datasets"
+  source: "beir"
+  base_url: "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets"
+  file: "msmarco.zip"
+  size_mb: 500
 
-  # Pre-computed embeddings (various models available)
-  embeddings:
-    # Sentence-BERT embeddings
-    sentence_bert:
-      url: "sentence-transformers/msmarco-distilbert-base-v4"
-      dimensions: 768
-
-    # E5 embeddings
-    e5:
-      url: "intfloat/e5-base-v2"
-      dimensions: 768
-
-    # BGE embeddings
-    bge:
-      url: "BAAI/bge-base-en-v1.5"
-      dimensions: 768
-
-  # Raw text (for generating embeddings)
-  raw:
-    passages: "ms_marco/passage_ranking"
-    queries: "ms_marco/passage_ranking"
-
-  # Pre-computed dataset files
-  precomputed:
-    base_url: "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets"
-    file: "msmarco.zip"
+# -----------------------------------------------------------------------------
+# Embedding Model Configuration
+# -----------------------------------------------------------------------------
+embedding:
+  model: "sentence-transformers/msmarco-distilbert-base-v4"
+  batch_size: 32
+  normalize: true
+  cache_embeddings: true  # Save generated embeddings for reuse
 
 # -----------------------------------------------------------------------------
 # File Format
 # -----------------------------------------------------------------------------
 format:
-  type: "hdf5"  # or tsv, jsonl
-  description: "HDF5 with embeddings and metadata"
+  type: "jsonl"
+  description: "JSON Lines with text passages"
 
 # -----------------------------------------------------------------------------
 # Subsets for Scalability Testing
 # -----------------------------------------------------------------------------
 subsets:
+  - name: "msmarco10k"
+    size: 10000
+    description: "10K passages for quick testing"
+  - name: "msmarco50k"
+    size: 50000
+    description: "50K passages for basic benchmarking"
   - name: "msmarco100k"
     size: 100000
-    description: "First 100K passages"
+    description: "100K passages (default)"
   - name: "msmarco500k"
     size: 500000
-    description: "First 500K passages"
-  - name: "msmarco1m"
-    size: 1000000
-    description: "First 1M passages"
+    description: "500K passages for thorough testing"
   - name: "msmarco_full"
     size: 8841823
-    description: "Full dataset"
+    description: "Full dataset (use only if needed)"
 
 # -----------------------------------------------------------------------------
 # Query Sets
 # -----------------------------------------------------------------------------
 query_sets:
-  - name: "dev"
-    size: 6980
-    description: "Development set queries"
-  - name: "eval"
-    size: 6837
-    description: "Evaluation set queries (no labels)"
-  - name: "train_sample"
-    size: 10000
-    description: "Sample from training queries"
+  default: 1000      # Use 1000 queries by default
+  dev: 6980         # Full dev set (optional)
 
 # -----------------------------------------------------------------------------
-# Relevance Judgments
+# Performance Notes
 # -----------------------------------------------------------------------------
-relevance:
-  # MS MARCO uses sparse judgments
-  type: "sparse"
-  format: "qrels"
-  graded: false  # Binary relevance
-
-  # For NDCG computation with graded relevance
-  graded_scale:
-    relevant: 1
-    non_relevant: 0
+notes:
+  - "Default subset size is 100K passages (~10 min to generate embeddings)"
+  - "Embeddings are cached after first generation"
+  - "Use 'tiny' preset (10K) for quick testing"
+  - "Full dataset (8.8M) requires 7+ hours and 20+ GB disk space"
+  - "Requires sentence-transformers: pip install sentence-transformers"
 
 # -----------------------------------------------------------------------------
 # Metadata (from passages)
 # -----------------------------------------------------------------------------
 metadata:
-  generate: false  # Use real metadata
+  generate: false
   fields:
     passage_id:
       type: "string"
       source: "dataset"
-    passage_text:
-      type: "string"
-      source: "dataset"
-      store: false  # Don't store in vector DB
-
-# -----------------------------------------------------------------------------
-# Evaluation Configuration
-# -----------------------------------------------------------------------------
-evaluation:
-  # Standard MS MARCO metrics
-  metrics:
-    - "MRR@10"
-    - "Recall@100"
-    - "Recall@1000"
-    - "NDCG@10"
-
-  # TREC-style evaluation
-  trec_eval: true
 
 # -----------------------------------------------------------------------------
 # Reference Papers
@@ -150,7 +126,3 @@ references:
     authors: "Nguyen et al."
     venue: "NeurIPS 2016 Workshop"
     url: "https://arxiv.org/abs/1611.09268"
-  - title: "MS MARCO: Benchmarking Ranking Models in the Large-Data Regime"
-    authors: "Craswell et al."
-    venue: "SIGIR 2021"
-    url: "https://arxiv.org/abs/2105.04021"
