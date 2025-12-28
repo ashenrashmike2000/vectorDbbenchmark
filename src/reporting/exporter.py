@@ -3,6 +3,7 @@ Export benchmark results to various formats.
 """
 
 import csv
+import os
 import json
 from datetime import datetime
 from pathlib import Path
@@ -89,9 +90,18 @@ class CSVExporter:
 
         if rows:
             fieldnames = list(rows[0].keys())
-            with open(output_path, 'w', newline='') as f:
+
+            # Check if file exists to decide whether to write the header
+            file_exists = os.path.isfile(output_path)
+
+            # Open in 'a' (append) mode instead of 'w' (write)
+            with open(output_path, 'a', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
+
+                # Only write header if the file is new
+                if not file_exists:
+                    writer.writeheader()
+
                 writer.writerows(rows)
 
         return str(output_path)
