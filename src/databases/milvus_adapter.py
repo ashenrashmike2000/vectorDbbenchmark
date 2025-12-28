@@ -188,11 +188,11 @@ class MilvusAdapter(VectorDBInterface):
         return 0.0
 
     def search(
-        self,
-        queries: NDArray[np.float32],
-        k: int,
-        search_params: Optional[Dict[str, Any]] = None,
-        filters: Optional[List[FilterCondition]] = None,
+            self,
+            queries: NDArray[np.float32],
+            k: int,
+            search_params: Optional[Dict[str, Any]] = None,
+            filters: Optional[List[FilterCondition]] = None,
     ) -> Tuple[NDArray[np.int64], NDArray[np.float32], List[float]]:
 
         if not self._collection:
@@ -207,15 +207,36 @@ class MilvusAdapter(VectorDBInterface):
         }
         current_metric = metric_map.get(self._distance_metric, "L2")
 
+        # --- FIX START: Detect Index Type & Set Correct Params ---
         if not search_params:
+            # Default params based on common Index Types
+            # HNSW needs 'ef', IVF needs 'nprobe'
+            index_type_guess = "HNSW"  # Default to HNSW as per your info config
+
+            # Try to infer from internal config if available
+            if hasattr(self, "_index_config") and self._index_config:
+                if hasattr(self._index_config.type, "name"):
+                    index_type_guess = self._index_config.type.name
+                elif isinstance(self._index_config.type, str):
+                    index_type_guess = self._index_config.type
+
             search_params = {
-                "metric_type": current_metric,  # <--- Use the correct metric!
-                "params": {"nprobe": 10}
+                "metric_type": current_metric,
+                "params": {}
             }
+
+            if "HNSW" in str(index_type_guess).upper():
+                # 'ef' controls search accuracy/speed for HNSW
+                # ef should be >= k (top_k)
+                search_params["params"] = {"ef": max(k * 2, 64)}
+            else:
+                # Default to IVF params
+                search_params["params"] = {"nprobe": 10}
         else:
             # Ensure metric_type is set even if user provided other params
             if "metric_type" not in search_params:
                 search_params["metric_type"] = current_metric
+        # --- FIX END ---
 
         latencies = []
         all_indices = []
