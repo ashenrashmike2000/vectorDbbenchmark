@@ -56,7 +56,11 @@ def manage_container(db_name, action):
         # Standard Docker Reset (Internal Volumes only)
         run_command_simple(f"docker compose -f \"{compose_file}\" down -v")
         run_command_simple(f"docker compose -f \"{compose_file}\" up -d")
-        time.sleep(WARMUP_TIME.get(db_name, 10))
+        if db_name == "milvus":
+            print("⏳ Waiting 60s for Milvus to initialize...")
+            time.sleep(60)  # Milvus needs time to start services!
+        else:
+            time.sleep(10)
 
     elif action == "down":
         print(f"🛑 Stopping {db_name}...")
