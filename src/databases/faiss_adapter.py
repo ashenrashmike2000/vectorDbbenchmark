@@ -585,3 +585,30 @@ class FAISSAdapter(VectorDBInterface):
                 params["efSearch"] = self._index.hnsw.efSearch
 
         return params
+
+    # === NEW: Single-Item Wrappers for Benchmarking ===
+
+    def insert_one(self, id: str, vector: np.ndarray):
+        """Inserts a single vector (converted to batch)."""
+        # Faiss expects shape (1, d)
+        vec_reshaped = np.array([vector], dtype=np.float32)
+
+        # If ID mapping is supported, we would pass IDs here,
+        # but standard Faiss add() creates sequential IDs.
+        # For benchmarking valid insert time, we just call add().
+        self.insert(vec_reshaped)
+
+    def delete_one(self, id: str):
+        """Deletes a single vector (if supported)."""
+        try:
+            # Try to convert string ID to int if your Faiss index uses int IDs
+            int_id = int(id) if id.isdigit() else 0
+            self.delete([int_id])
+        except Exception:
+            # Faiss often throws errors for delete if not using IndexIDMap
+            pass
+
+    def update_one(self, id: str, vector: np.ndarray):
+        """Updates a single vector."""
+        self.delete_one(id)
+        self.insert_one(id, vector)

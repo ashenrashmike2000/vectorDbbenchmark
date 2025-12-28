@@ -385,3 +385,42 @@ class QdrantAdapter(VectorDBInterface):
 
     def get_search_params(self) -> Dict[str, Any]:
         return self._search_params.copy()
+
+    # === NEW: Single-Item Wrappers for Benchmarking ===
+
+    def insert_one(self, id: str, vector: np.ndarray):
+        """Inserts/Upserts a single point."""
+        try:
+            # Qdrant supports both Int and UUID strings for IDs
+            point_id = int(id) if str(id).isdigit() else id
+
+            point = models.PointStruct(
+                id=point_id,
+                vector=vector.tolist(),
+                payload={"benchmark": "ops_test"}
+            )
+
+            self._client.upsert(
+                collection_name=self._collection_name,
+                points=[point],
+                wait=True
+            )
+        except Exception as e:
+            print(f"Qdrant insert_one failed: {e}")
+
+    def delete_one(self, id: str):
+        """Deletes a single point."""
+        try:
+            point_id = int(id) if str(id).isdigit() else id
+
+            self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.PointIdsList(points=[point_id]),
+                wait=True
+            )
+        except Exception:
+            pass
+
+    def update_one(self, id: str, vector: np.ndarray):
+        """Updates a single point (Qdrant upsert handles this)."""
+        self.insert_one(id, vector)

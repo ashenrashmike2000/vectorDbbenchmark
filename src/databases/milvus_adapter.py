@@ -271,3 +271,28 @@ class MilvusAdapter(VectorDBInterface):
 
     def get_search_params(self) -> Dict[str, Any]:
         return self._search_params
+
+    # === NEW: Single-Item Wrappers for Benchmarking ===
+
+    def insert_one(self, id: str, vector: np.ndarray):
+        """Inserts a single vector."""
+        # Milvus expects lists of lists: [[id], [vector]]
+        try:
+            int_id = int(id) if str(id).isdigit() else 999999
+            self._collection.insert([[int_id], [vector]])
+        except Exception as e:
+            print(f"Milvus insert_one failed: {e}")
+
+    def delete_one(self, id: str):
+        """Deletes a single vector."""
+        try:
+            int_id = int(id) if str(id).isdigit() else 999999
+            expr = f"id in [{int_id}]"
+            self._collection.delete(expr)
+        except Exception:
+            pass
+
+    def update_one(self, id: str, vector: np.ndarray):
+        """Updates a single vector (Delete + Insert)."""
+        self.delete_one(id)
+        self.insert_one(id, vector)

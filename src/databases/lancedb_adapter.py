@@ -245,3 +245,22 @@ class LanceDBAdapter(VectorDBInterface):
 
     def get_search_params(self) -> Dict[str, Any]:
         return self._search_params
+
+    # === NEW: Single-Item Wrappers for Benchmarking ===
+
+    def insert_one(self, id: str, vector: np.ndarray):
+        """Inserts a single vector."""
+        # Wrap the single vector in a list and pass to LanceDB
+        data = [{"id": id, "vector": vector, "text": "benchmark_update_test"}]
+        self._table.add(data)
+
+    def delete_one(self, id: str):
+        """Deletes a single vector by ID."""
+        # Note: We use quotes '{id}' because the ID is a string
+        self._table.delete(f"id = '{id}'")
+
+    def update_one(self, id: str, vector: np.ndarray):
+        """Updates a single vector (Delete + Insert)."""
+        # LanceDB (and many vector DBs) handles updates as delete-then-insert
+        self.delete_one(id)
+        self.insert_one(id, vector)

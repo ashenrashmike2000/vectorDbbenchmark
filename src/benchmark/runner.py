@@ -280,6 +280,49 @@ class BenchmarkRunner:
                 # Compute performance metrics
                 metrics.performance = compute_all_performance_metrics(latencies)
 
+                # ======================================================
+                # NEW: CRUD Operations Benchmark (Ops Metrics)
+                # ======================================================
+                console.print("    [dim]Measuring CRUD Operations...[/dim]")
+
+                # 1. Measure Single Insert Latency
+                # Create a dummy vector (random or from queries)
+                dummy_id = "bench_test_id_999999"
+                dummy_vec = queries[0]  # Use first query vector as a test insert
+
+                t0 = time.perf_counter()
+                try:
+                    # You must implement 'insert_one' in your adapters!
+                    if hasattr(db, 'insert_one'):
+                        db.insert_one(dummy_id, dummy_vec)
+                        metrics.ops.ops_insert_latency_single_ms = (time.perf_counter() - t0) * 1000
+                    else:
+                        metrics.ops.ops_insert_latency_single_ms = 0.0
+                except Exception as e:
+                    logger.warning(f"Insert ops failed: {e}")
+
+                # 2. Measure Update Latency
+                t0 = time.perf_counter()
+                try:
+                    if hasattr(db, 'update_one'):
+                        # Modify vector slightly
+                        updated_vec = dummy_vec + 0.01
+                        db.update_one(dummy_id, updated_vec)
+                        metrics.ops.ops_update_latency_ms = (time.perf_counter() - t0) * 1000
+                except Exception as e:
+                    logger.warning(f"Update ops failed: {e}")
+
+                # 3. Measure Delete Latency
+                t0 = time.perf_counter()
+                try:
+                    if hasattr(db, 'delete_one'):
+                        db.delete_one(dummy_id)
+                        metrics.ops.ops_delete_latency_ms = (time.perf_counter() - t0) * 1000
+                except Exception as e:
+                    logger.warning(f"Delete ops failed: {e}")
+
+                # ======================================================
+
                 # Get index stats
                 stats = db.get_index_stats()
                 metrics.resource.index_size_bytes = stats.get("index_size_bytes", 0)

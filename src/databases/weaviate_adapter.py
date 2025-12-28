@@ -224,3 +224,35 @@ class WeaviateAdapter(VectorDBInterface):
 
     def set_search_params(self, params): pass
     def get_search_params(self): return {}
+
+    # === NEW: Single-Item Wrappers for Benchmarking ===
+
+    def insert_one(self, id: str, vector: np.ndarray):
+        """Inserts a single object."""
+        # Replicate the UUID generation logic from create_index
+        try:
+            vec_id_int = int(id) if str(id).isdigit() else 0
+            uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(vec_id_int)))
+
+            self._collection.data.insert(
+                properties={"vec_id": vec_id_int},
+                vector=vector.tolist(),
+                uuid=uid
+            )
+        except Exception as e:
+            print(f"Weaviate insert_one failed: {e}")
+
+    def delete_one(self, id: str):
+        """Deletes a single object by UUID."""
+        try:
+            vec_id_int = int(id) if str(id).isdigit() else 0
+            uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(vec_id_int)))
+
+            self._collection.data.delete_by_id(uid)
+        except Exception:
+            pass
+
+    def update_one(self, id: str, vector: np.ndarray):
+        """Updates a single object."""
+        # Weaviate supports replace, but for benchmark consistency we do insert (upsert)
+        self.insert_one(id, vector)

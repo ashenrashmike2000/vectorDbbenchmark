@@ -344,3 +344,49 @@ class PgvectorAdapter(VectorDBInterface):
 
     def get_search_params(self) -> Dict[str, Any]:
         return self._search_params.copy()
+
+    # === NEW: Single-Item Wrappers for Benchmarking ===
+
+    def insert_one(self, id: str, vector: np.ndarray):
+        """Inserts a single row via SQL."""
+        try:
+            int_id = int(id) if str(id).isdigit() else 999999
+
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"INSERT INTO {self._table_name} (id, vector) VALUES (%s, %s)",
+                    (int_id, vector.tolist())
+                )
+            self._conn.commit()
+        except Exception as e:
+            # Catch primary key collision or other SQL errors
+            print(f"Pgvector insert_one failed: {e}")
+            self._conn.rollback()
+
+    def delete_one(self, id: str):
+        """Deletes a single row via SQL."""
+        try:
+            int_id = int(id) if str(id).isdigit() else 999999
+
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self._table_name} WHERE id = %s",
+                    (int_id,)
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+
+    def update_one(self, id: str, vector: np.ndarray):
+        """Updates a single row via SQL."""
+        try:
+            int_id = int(id) if str(id).isdigit() else 999999
+
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {self._table_name} SET vector = %s WHERE id = %s",
+                    (vector.tolist(), int_id)
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
