@@ -113,7 +113,7 @@ def main():
 
                 print(f"\n▶️  Running: {db} on {dataset}...")
                 cmd = (
-                    f"python \"{runner_script}\" --database {db} --dataset {dataset} --runs {args.runs} --export {export_str}")
+                    f"\"{sys.executable}\" \"{runner_script}\" --database {db} --dataset {dataset} --runs {args.runs} --export {export_str}")
 
                 try:
                     run_benchmark_command(cmd)
