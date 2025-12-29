@@ -27,18 +27,19 @@ DOCKER_MAP = {
 }
 
 WARMUP_TIME = {
-    "milvus": 60, "qdrant": 30, "weaviate": 30, "pgvector": 30,
+    "milvus": 200, "qdrant": 30, "weaviate": 30, "pgvector": 30,
     "chroma": 30, "lancedb": 0, "faiss": 0
 }
 
-
 def run_command_simple(cmd):
-    """Executes a shell command silently (for docker operations)."""
+    """Executes a shell command AND PRINTS ERRORS if it fails."""
     try:
+        # Removed stderr=DEVNULL so errors show up in your terminal
         subprocess.run(cmd, shell=True, check=True, cwd=PROJECT_ROOT,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except:
-        pass
+                       stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Docker Command Failed: {cmd}")
+        print(f"   Error: {e}")
 
 
 def cleanup_host_volumes():
@@ -88,21 +89,21 @@ def manage_container(db_name, action):
 
         # 2. START CONTAINER
         print(f"🚀 Starting {db_name}...")
-        run_command_simple(f"docker compose -f \"{compose_file}\" up -d")
+        run_command_simple(f"docker-compose -f \"{compose_file}\" up -d")
 
     elif action == "restart":
         print(f"♻️  RESET: Restarting {db_name}...")
-        run_command_simple(f"docker compose -f \"{compose_file}\" down -v")
+        run_command_simple(f"docker-compose -f \"{compose_file}\" down -v")
 
         # 1. CLEANUP DATA BEFORE RESTARTING
         cleanup_host_volumes()
 
         time.sleep(5)
-        run_command_simple(f"docker compose -f \"{compose_file}\" up -d")
+        run_command_simple(f"docker-compose -f \"{compose_file}\" up -d")
 
     elif action == "down":
         print(f"🛑 Stopping {db_name}...")
-        run_command_simple(f"docker compose -f \"{compose_file}\" down -v")
+        run_command_simple(f"docker-compose -f \"{compose_file}\" down -v")
 
         # 1. FINAL CLEANUP
         cleanup_host_volumes()
@@ -113,7 +114,7 @@ def manage_container(db_name, action):
     # =========================================================
     if db_name == "milvus":
         print("⏳ Polling Milvus port 19530...")
-        if wait_for_port(19530, timeout=200):
+        if wait_for_port(19530, timeout=500):
             print("✅ Milvus is ready!")
             time.sleep(10)
         else:
@@ -128,7 +129,7 @@ def force_cleanup_all():
     print("\n🛑 INTERRUPTED! Shutting down all containers...")
     for db, file in DOCKER_MAP.items():
         if file and os.path.exists(file):
-            run_command_simple(f"docker compose -f \"{file}\" down")
+            run_command_simple(f"docker-compose -f \"{file}\" down")
     cleanup_host_volumes()
     print("✅ Cleanup complete.")
 
@@ -151,7 +152,7 @@ def main():
     # Initial Cleanup
     print("🧹 Cleaning up workspace...")
     for db, file in DOCKER_MAP.items():
-        if file and os.path.exists(file): run_command_simple(f"docker compose -f \"{file}\" down")
+        if file and os.path.exists(file): run_command_simple(f"docker-compose -f \"{file}\" down")
     cleanup_host_volumes()
 
     try:
