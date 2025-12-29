@@ -129,7 +129,7 @@ def force_cleanup_all():
     print("\n🛑 INTERRUPTED! Shutting down all containers...")
     for db, file in DOCKER_MAP.items():
         if file and os.path.exists(file):
-            run_command_simple(f"docker-compose -f \"{file}\" down")
+            run_command_simple(f"docker-compose -f \"{file}\" down -v")
     cleanup_host_volumes()
     print("✅ Cleanup complete.")
 
@@ -152,7 +152,7 @@ def main():
     # Initial Cleanup
     print("🧹 Cleaning up workspace...")
     for db, file in DOCKER_MAP.items():
-        if file and os.path.exists(file): run_command_simple(f"docker-compose -f \"{file}\" down")
+        if file and os.path.exists(file): run_command_simple(f"docker-compose -f \"{file}\" down -v")
     cleanup_host_volumes()
 
     try:
