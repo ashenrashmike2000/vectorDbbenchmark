@@ -17,11 +17,11 @@ def get_root_path(filename):
 
 
 DOCKER_MAP = {
-    "milvus": get_root_path("milvus-docker-compose.yml"),
-    "qdrant": get_root_path("qdrant-docker-compose.yml"),
+    "chroma": get_root_path("chroma-docker-compose.yml"),
     "weaviate": get_root_path("weaviate-docker-compose.yml"),
     "pgvector": get_root_path("pgvector-docker-compose.yml"),
-    "chroma": get_root_path("chroma-docker-compose.yml"),
+    "qdrant": get_root_path("qdrant-docker-compose.yml"),
+    "milvus": get_root_path("milvus-docker-compose.yml"),
     "lancedb": None,
     "faiss": None
 }
