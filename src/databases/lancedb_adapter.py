@@ -130,7 +130,8 @@ class LanceDBAdapter(VectorDBInterface):
         metric = metric_map.get(distance_metric, "L2")
 
         params = index_config.params
-        target_m = params.get("m", 96)
+        # FIX: Reduced default 'm' to a more standard value (16) to improve build speed
+        target_m = params.get("m", 16)
 
         def get_valid_m(dim, target):
             if dim % target == 0: return target
@@ -149,7 +150,8 @@ class LanceDBAdapter(VectorDBInterface):
             metric=metric,
             vector_column_name="vector",
             num_partitions=num_partitions,
-            num_sub_vectors=num_sub_vectors
+            num_sub_vectors=num_sub_vectors,
+            replace=True # Overwrite existing index
         )
 
         self._num_vectors = n_vectors

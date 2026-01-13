@@ -6,6 +6,7 @@ import uuid
 import json
 import logging
 import time
+import random
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -209,11 +210,6 @@ class BenchmarkRunner:
                         distance_metric=metric,
                     )
 
-                # If the adapter has the smart wait method, use it
-                if db_name == "weaviate":
-                    console.print("\n[yellow]⏳ Weaviate detected: Sleeping 300s to allow HNSW index build...[/yellow]")
-                    time.sleep(300)
-
                 # Capture Build Metrics
                 build_metrics = ResourceMetrics()
                 build_metrics.index_build_time_sec = build_time
@@ -349,10 +345,8 @@ class BenchmarkRunner:
                 pass
 
             # 1. Measure Single Insert Latency
-            if db.name in ["qdrant", "weaviate", "lancedb"]:
-                dummy_id = str(uuid.uuid4())
-            else:
-                dummy_id = "10000000"
+            # Use a large random integer to avoid collisions and work with all DBs
+            dummy_id = str(random.randint(10_000_000, 99_999_999))
 
             t0 = time.perf_counter()
             try:
