@@ -15,7 +15,14 @@ services:
       # Persist data so you don't lose it between restarts
       - ./volumes/pgvector_data:/var/lib/postgresql/data
     # Tune shared buffers for better vector performance (optional but recommended)
-    command: postgres -c shared_buffers=512MB -c work_mem=16MB
+    # Increased maintenance_work_mem to speed up HNSW index build
+    command: >
+      postgres 
+      -c shared_buffers=2GB 
+      -c work_mem=64MB 
+      -c maintenance_work_mem=2GB 
+      -c max_parallel_maintenance_workers=4
+      -c effective_cache_size=4GB
 
 volumes:
   pgvector_data:

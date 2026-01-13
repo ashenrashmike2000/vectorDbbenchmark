@@ -49,10 +49,8 @@ def compute_recall_at_k(
         else:
             intersection = len(retrieved_k & true_neighbors)
 
-            # --- THE FIX ---
-            # We divide by 'min(k, len)' so the score is relative to what we asked for.
-            # If we asked for 10 items, and found 10, we get 1.0.
-            denominator = min(k, len(true_neighbors))
+            # Standard Recall Definition: Intersection / Total Relevant
+            denominator = len(true_neighbors)
 
             if denominator == 0:
                 recalls.append(0.0)

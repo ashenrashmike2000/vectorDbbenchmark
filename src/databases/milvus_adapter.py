@@ -285,7 +285,23 @@ class MilvusAdapter(VectorDBInterface):
 
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection: return {}
-        return {"num_vectors": self._collection.num_entities, "dimensions": self._dimensions}
+        
+        stats = {
+            "num_vectors": self._collection.num_entities,
+            "dimensions": self._dimensions
+        }
+        
+        # Try to get memory usage
+        try:
+            # This returns a list of SegmentInfo
+            segments = utility.get_query_segment_info(self._collection_name)
+            total_mem_size = sum([s.mem_size for s in segments])
+            stats["index_size_bytes"] = total_mem_size
+        except Exception as e:
+            # Fallback or log
+            pass
+            
+        return stats
 
     def set_search_params(self, params: Dict[str, Any]) -> None:
         self._search_params = params

@@ -424,6 +424,7 @@ class BenchmarkResult:
     # Identification
     experiment_name: str
     timestamp: datetime = field(default_factory=datetime.now)
+    retrieval_method: str = "vector_search"
 
     # Configuration
     database_info: Optional[DatabaseInfo] = None
@@ -450,6 +451,7 @@ class BenchmarkResult:
         return {
             "experiment_name": self.experiment_name,
             "timestamp": self.timestamp.isoformat(),
+            "retrieval_method": self.retrieval_method,
             "database": self.database_info.name if self.database_info else None,
             "dataset": self.dataset_info.name if self.dataset_info else None,
             "index_config": self.index_config.name if self.index_config else None,

@@ -16,6 +16,7 @@ try:
     import weaviate
     from weaviate.classes import config as wvc
     from weaviate.classes import query as wvq
+    from weaviate.classes import aggregate as wva
     from weaviate.classes.init import AdditionalConfig, Timeout
     WEAVIATE_AVAILABLE = True
 except ImportError:
@@ -220,7 +221,16 @@ class WeaviateAdapter(VectorDBInterface):
 
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection: return {}
-        return {"num_vectors": self._dimensions}
+
+        stats = {"dimensions": self._dimensions}
+        try:
+            # Use aggregation to get total count
+            agg = self._collection.aggregate.over_all(total_count=True)
+            stats["num_vectors"] = agg.total_count
+        except Exception:
+            stats["num_vectors"] = 0
+
+        return stats
 
     def set_search_params(self, params): pass
     def get_search_params(self): return {}
@@ -232,7 +242,8 @@ class WeaviateAdapter(VectorDBInterface):
         # Replicate the UUID generation logic from create_index
         try:
             vec_id_int = int(id) if str(id).isdigit() else 0
-            uid = str(uuid.uuid4())
+            # FIX: Use deterministic UUID to match delete_one
+            uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(vec_id_int)))
 
             self._collection.data.insert(
                 properties={"vec_id": vec_id_int},
