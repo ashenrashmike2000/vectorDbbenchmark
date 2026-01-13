@@ -274,5 +274,15 @@ class WeaviateAdapter(VectorDBInterface):
 
     def update_one(self, id: str, vector: np.ndarray):
         """Updates a single object."""
-        # Weaviate supports replace, but for benchmark consistency we do insert (upsert)
-        self.insert_one(id, vector)
+        try:
+            vec_id_int = int(id) if str(id).isdigit() else 0
+            uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(vec_id_int)))
+
+            # FIX: Use replace instead of insert for updates
+            self._collection.data.replace(
+                properties={"vec_id": vec_id_int},
+                vector=vector.tolist(),
+                uuid=uid
+            )
+        except Exception as e:
+            print(f"Weaviate update_one failed: {e}")

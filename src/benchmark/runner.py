@@ -210,6 +210,11 @@ class BenchmarkRunner:
                         distance_metric=metric,
                     )
 
+                # If the adapter has the smart wait method, use it
+                if db_name == "weaviate":
+                    # Removed 300s sleep as WeaviateAdapter now handles wait
+                    pass
+
                 # Capture Build Metrics
                 build_metrics = ResourceMetrics()
                 build_metrics.index_build_time_sec = build_time
