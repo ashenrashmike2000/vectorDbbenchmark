@@ -7,6 +7,8 @@ import json
 import logging
 import time
 import random
+import gc
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -101,19 +103,37 @@ class BenchmarkRunner:
 
         for dataset_name in datasets:
             console.print(f"\n[bold]Loading dataset: {dataset_name}[/bold]")
-            dataset = get_dataset(dataset_name, data_dir=self.config.dataset.data_dir)
-            dataset.ensure_downloaded()
+            try:
+                dataset = get_dataset(dataset_name, data_dir=self.config.dataset.data_dir)
+                dataset.ensure_downloaded()
 
-            for db_name in databases:
-                console.print(f"\n[bold cyan]Benchmarking: {db_name} on {dataset_name}[/bold cyan]")
+                for db_name in databases:
+                    console.print(f"\n[bold cyan]Benchmarking: {db_name} on {dataset_name}[/bold cyan]")
+                    # Flush stdout to ensure logs are captured before potential crash
+                    sys.stdout.flush()
 
-                try:
-                    result = self._run_single_benchmark(db_name, dataset, index_configs)
-                    results.append(result)
-                    self._print_summary(result)
-                except Exception as e:
-                    logger.error(f"Benchmark failed for {db_name}: {e}")
-                    console.print(f"[red]Error: {e}[/red]")
+                    try:
+                        result = self._run_single_benchmark(db_name, dataset, index_configs)
+                        results.append(result)
+                        self._print_summary(result)
+                        
+                        # Save intermediate results
+                        self.save_results()
+                        
+                    except Exception as e:
+                        logger.error(f"Benchmark failed for {db_name}: {e}")
+                        console.print(f"[red]Error: {e}[/red]")
+                    
+                    # Force garbage collection after each DB run
+                    gc.collect()
+
+                # Cleanup dataset memory
+                del dataset
+                gc.collect()
+                
+            except Exception as e:
+                logger.error(f"Failed to load or process dataset {dataset_name}: {e}")
+                console.print(f"[red]Dataset Error: {e}[/red]")
 
         self.results = results
         return results
@@ -241,6 +261,9 @@ class BenchmarkRunner:
                     runs.append(run_result)
                     console.print(f"    Run {run_id + 1}: Recall@10={run_result.metrics.quality.recall_at_10:.4f}, "
                                 f"Latency_p50={run_result.metrics.performance.latency_p50:.2f}ms")
+                    
+                    # Flush logs
+                    sys.stdout.flush()
 
                 result.runs.extend(runs)
 
@@ -260,6 +283,9 @@ class BenchmarkRunner:
                         db.disconnect()  # <--- FIXED: Explicitly disconnect
                     except Exception as e:
                         logger.error(f"Failed to disconnect: {e}")
+                
+                # Force GC after index cleanup
+                gc.collect()
 
         result.num_runs = len(result.runs)
 

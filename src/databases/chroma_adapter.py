@@ -130,18 +130,20 @@ class ChromaAdapter(VectorDBInterface):
         print(f"🚀 Chroma: Inserting {n_vectors} vectors in batches...")
 
         vector_ids = [str(i) for i in (ids if ids else range(n_vectors))]
-        # Convert numpy to list (required by Chroma)
-        vector_data = vectors.tolist()
-
+        
         # Batch size 2000 is safe for 768d vectors (approx 6MB payload)
         batch_size = 2000
 
         for i in range(0, n_vectors, batch_size):
             end = min(i + batch_size, n_vectors)
 
+            # FIX: Convert ONLY the current batch to list to save memory
+            # Converting the entire 1M vectors to list at once causes OOM
+            batch_embeddings = vectors[i:end].tolist()
+
             self._collection.add(
                 ids=vector_ids[i:end],
-                embeddings=vector_data[i:end],
+                embeddings=batch_embeddings,
                 metadatas=metadata[i:end] if metadata else None
             )
 
