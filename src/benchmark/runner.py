@@ -473,12 +473,16 @@ class BenchmarkRunner:
         if not result.mean_metrics:
             return
 
-        table = Table(title=f"Results: {result.experiment_name}")
+        table = Table(
+            title=f"Results: {result.experiment_name}",
+            caption="Recall is normalized by total ground truth size (typically 100). Precision is # Relevant / K."
+        )
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
 
         m = result.mean_metrics
         table.add_row("Recall@10", f"{m.quality.recall_at_10:.4f}")
+        table.add_row("Precision@10", f"{m.quality.precision_at_10:.4f}")
         table.add_row("Recall@100", f"{m.quality.recall_at_100:.4f}")
         table.add_row("MRR", f"{m.quality.mrr:.4f}")
         table.add_row("Latency p50 (ms)", f"{m.performance.latency_p50:.2f}")
