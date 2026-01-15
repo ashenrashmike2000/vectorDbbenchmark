@@ -131,6 +131,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         params = index_config.params
         # FIX: Reduced default 'm' to a more standard value (16) to improve build speed
+        # Optimized for GIST1M (High Dimensionality)
         target_m = params.get("m", 16)
 
         def get_valid_m(dim, target):
@@ -184,7 +185,8 @@ class LanceDBAdapter(VectorDBInterface):
         self.validate_vectors(queries)
 
         params = search_params or {}
-        nprobes = params.get("nprobes", 20)
+        # FIX: Increased default nprobes to 50 to improve recall
+        nprobes = params.get("nprobes", 50)
 
         latencies = []
         all_indices = []
