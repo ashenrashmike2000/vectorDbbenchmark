@@ -9,7 +9,7 @@ import pandas as pd
 import seaborn as sns
 
 class BenchmarkVisualizer:
-    def __init__(self, style: str = "seaborn-v0_8-whitegrid", figsize: tuple = (10, 6), dpi: int = 300):
+    def __init__(self, style: str = "seaborn-v0_8-whitegrid", figsize: tuple = (14, 8), dpi: int = 300):
         try:
             plt.style.use(style)
         except OSError:
@@ -17,101 +17,94 @@ class BenchmarkVisualizer:
         self.figsize = figsize
         self.dpi = dpi
 
-    def _get_metric(self, obj, attr_name, dict_key, default=0.0):
-        """Safely extract metric from object or dict."""
-        # Try attribute first
-        if hasattr(obj, attr_name):
-            return getattr(obj, attr_name)
-        # Try as dictionary
-        if hasattr(obj, "to_dict"):
-            d = obj.to_dict()
-            return d.get(dict_key, default)
-        if isinstance(obj, dict):
-            return obj.get(dict_key, default)
-        return default
-
-    def generate_all_plots(self, results: List[Any], output_dir: str) -> List[str]:
+    def generate_all_plots(self, df: pd.DataFrame, output_dir: str) -> List[str]:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        data = []
-        for r in results:
-            # Handle Metrics Extraction
-            metrics = getattr(r, "mean_metrics", None)
-            if not metrics: continue
-
-            # Extract Recall@10 safely
-            recall_10 = self._get_metric(metrics, "recall_at_10", "quality_recall@10")
-
-            # Extract Performance Metrics safely
-            perf = getattr(metrics, "performance", None)
-            if perf:
-                lat_p50 = self._get_metric(perf, "latency_p50_ms", "perf_latency_p50_ms")
-                lat_p99 = self._get_metric(perf, "latency_p99_ms", "perf_latency_p99_ms")
-                qps = self._get_metric(perf, "qps_single_thread", "perf_qps")
-            else:
-                # Try direct access on metrics object (flattened case)
-                lat_p50 = self._get_metric(metrics, "latency_p50_ms", "perf_latency_p50_ms")
-                lat_p99 = self._get_metric(metrics, "latency_p99_ms", "perf_latency_p99_ms")
-                qps = self._get_metric(metrics, "qps_single_thread", "perf_qps")
-
-            # Extract Database/Dataset Name
-            db_name = getattr(r, "database", None)
-            ds_name = getattr(r, "dataset", None)
-
-            if not db_name or not ds_name:
-                try:
-                    parts = r.experiment_name.split('_')
-                    db_name = parts[0]
-                    ds_name = "_".join(parts[1:])
-                except:
-                    db_name, ds_name = "unknown", "unknown"
-
-            item = {
-                "Database": db_name,
-                "Dataset": ds_name,
-                "Recall@10": recall_10,
-                "Latency P50 (ms)": lat_p50,
-                "Latency P99 (ms)": lat_p99,
-                "QPS": qps,
-                "Build Time (s)": getattr(r, "build_time_seconds", 0.0)
-            }
-            data.append(item)
-
-        if not data:
+        if df.empty:
             print("⚠️ No valid results to plot.")
             return []
 
-        df = pd.DataFrame(data)
+        # Define the mapping from original CSV column names to pretty plot labels
+        metric_map = {
+            "recall@100": "Recall@100",
+            "precision@10": "Precision@10",
+            "mrr": "MRR",
+            "ndcg@100": "NDCG@100",
+            "map@100": "MAP@100",
+            "hit_rate@10": "HitRate@10",
+            "latency_p50_ms": "Latency P50 (ms)",
+            "latency_p99_ms": "Latency P99 (ms)",
+            "qps_single_thread": "QPS",
+            "index_build_time_sec": "Build Time (s)",
+            "index_size_mb": "Index Size (MB)",
+            "ram_mb_peak": "RAM Peak (MB)",
+            "insert_latency_single_ms": "Insert Latency (ms)",
+            "update_latency_ms": "Update Latency (ms)",
+            "delete_latency_ms": "Delete Latency (ms)",
+        }
+
+        # Rename columns for plotting
+        plot_df = df.rename(columns=metric_map)
+        
         generated_plots = []
 
-        # Generate Dataset-wise Plots
-        datasets = df["Dataset"].unique()
-        for dataset in datasets:
-            ds_df = df[df["Dataset"] == dataset]
-            if ds_df.empty: continue
+        # Define metrics to plot using the NEW (pretty) names
+        metrics_to_plot = [
+            ("Recall@100", "viridis"),
+            ("Precision@10", "plasma"),
+            ("MRR", "magma"),
+            ("NDCG@100", "cividis"),
+            ("MAP@100", "inferno"),
+            ("HitRate@10", "cividis"),
+            ("Latency P50 (ms)", "rocket"),
+            ("Latency P99 (ms)", "rocket_r"),
+            ("QPS", "viridis"),
+            ("Build Time (s)", "mako"),
+            ("Index Size (MB)", "cubehelix"),
+            ("RAM Peak (MB)", "YlGnBu"),
+            ("Insert Latency (ms)", "BuPu"),
+            ("Update Latency (ms)", "GnBu"),
+            ("Delete Latency (ms)", "OrRd"),
+        ]
 
-            generated_plots.append(self._create_bar_plot(
-                ds_df, "Database", "QPS", f"QPS - {dataset}", output_dir / f"{dataset}_qps.png", "viridis"))
-            generated_plots.append(self._create_bar_plot(
-                ds_df, "Database", "Latency P50 (ms)", f"Latency P50 - {dataset}", output_dir / f"{dataset}_latency.png", "rocket"))
-            generated_plots.append(self._create_bar_plot(
-                ds_df, "Database", "Build Time (s)", f"Build Time - {dataset}", output_dir / f"{dataset}_build_time.png", "mako"))
-            generated_plots.append(self._create_bar_plot(
-                ds_df, "Database", "Recall@10", f"Recall@10 - {dataset}", output_dir / f"{dataset}_recall.png", "crest"))
+        # Generate one plot per metric, comparing all experiments
+        for metric_name, palette in metrics_to_plot:
+            if metric_name not in plot_df.columns:
+                print(f"⚠️ Metric '{metric_name}' not found in results, skipping plot.")
+                continue
+
+            # Sanitize metric name for filename
+            filename_metric = metric_name.replace("@", "_").replace(" ", "_").replace("(", "").replace(")", "")
+            
+            generated_plots.append(self._create_grouped_bar_plot(
+                plot_df, 
+                "database", 
+                metric_name, 
+                "dataset",
+                f"Comparison of {metric_name}",
+                output_dir / f"{filename_metric}.png", 
+                palette
+            ))
 
         return generated_plots
 
-    def _create_bar_plot(self, df, x, y, title, filename, color):
+    def _create_grouped_bar_plot(self, df, x, y, hue, title, filename, palette):
         plt.figure(figsize=self.figsize)
-        ax = sns.barplot(data=df, x=x, y=y, hue=x, palette=color, legend=False)
-        for container in ax.containers:
-            ax.bar_label(container, fmt='%.2f', padding=3)
-        plt.title(title, fontsize=14)
-        plt.xlabel(x, fontsize=12)
+        
+        ax = sns.barplot(data=df, x=x, y=y, hue=hue, palette=palette)
+        
+        # Add labels to each bar, but only if there are not too many bars
+        if len(df) < 30:
+            for container in ax.containers:
+                ax.bar_label(container, fmt='%.2f', padding=3, rotation=45, fontsize=8)
+            
+        plt.title(title, fontsize=16, weight='bold')
+        plt.xlabel(None)
         plt.ylabel(y, fontsize=12)
-        plt.xticks(rotation=45)
-        plt.tight_layout()
+        plt.xticks(rotation=0) # No rotation needed for database names
+        plt.legend(title=hue, bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust layout to make room for legend
         plt.savefig(filename, dpi=self.dpi, bbox_inches="tight")
         plt.close()
         return str(filename)
