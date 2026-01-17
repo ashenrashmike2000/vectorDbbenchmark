@@ -116,7 +116,7 @@ class BenchmarkRunner:
                         result = self._run_single_benchmark(db_name, dataset, index_configs)
                         results.append(result)
                         self._print_summary(result)
-
+                        
                     except Exception as e:
                         logger.error(f"Benchmark failed for {db_name}: {e}")
                         console.print(f"[red]Error: {e}[/red]")
@@ -226,16 +226,12 @@ class BenchmarkRunner:
                         index_config=idx_config,
                         distance_metric=metric,
                     )
-
-                # If the adapter has the smart wait method, use it
-                if db_name == "weaviate":
-                    # Removed 300s sleep as WeaviateAdapter now handles wait
-                    pass
-
+                
                 # Capture Build Metrics
                 build_metrics = ResourceMetrics()
                 build_metrics.index_build_time_sec = build_time
                 build_metrics.ram_bytes_peak = build_monitor.peak_memory_bytes
+                build_metrics.cpu_utilization_percent = build_monitor.avg_cpu_percent
                 
                 # Get index stats
                 stats = db.get_index_stats()

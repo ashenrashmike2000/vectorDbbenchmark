@@ -27,22 +27,30 @@ class BenchmarkVisualizer:
 
         # Define the mapping from original CSV column names to pretty plot labels
         metric_map = {
+            "recall@1": "Recall@1",
+            "recall@10": "Recall@10",
+            "recall@50": "Recall@50",
             "recall@100": "Recall@100",
             "precision@10": "Precision@10",
+            "f1@10": "F1@10",
             "mrr": "MRR",
             "ndcg@100": "NDCG@100",
             "map@100": "MAP@100",
             "hit_rate@10": "HitRate@10",
             "latency_p50_ms": "Latency P50 (ms)",
+            "latency_p90_ms": "Latency P90 (ms)",
+            "latency_p95_ms": "Latency P95 (ms)",
             "latency_p99_ms": "Latency P99 (ms)",
             "qps_single_thread": "QPS",
             "index_build_time_sec": "Build Time (s)",
             "index_size_mb": "Index Size (MB)",
             "ram_mb_peak": "RAM Peak (MB)",
             "bytes_per_vector": "Bytes per Vector",
+            "cpu_utilization_percent": "CPU Utilization (%)",
             "insert_latency_single_ms": "Insert Latency (ms)",
             "update_latency_ms": "Update Latency (ms)",
             "delete_latency_ms": "Delete Latency (ms)",
+            "insert_throughput_batch": "Batch Throughput (vec/s)",
         }
 
         # Rename columns for plotting
@@ -52,22 +60,30 @@ class BenchmarkVisualizer:
 
         # Define metrics to plot using the NEW (pretty) names
         metrics_to_plot = [
+            ("Recall@1", "viridis"),
+            ("Recall@10", "viridis"),
+            ("Recall@50", "viridis"),
             ("Recall@100", "viridis"),
             ("Precision@10", "plasma"),
+            ("F1@10", "cividis"),
             ("MRR", "magma"),
             ("NDCG@100", "cividis"),
             ("MAP@100", "inferno"),
             ("HitRate@10", "cividis"),
             ("Latency P50 (ms)", "rocket"),
+            ("Latency P90 (ms)", "rocket"),
+            ("Latency P95 (ms)", "rocket"),
             ("Latency P99 (ms)", "rocket_r"),
             ("QPS", "viridis"),
             ("Build Time (s)", "mako"),
             ("Index Size (MB)", "cubehelix"),
             ("RAM Peak (MB)", "YlGnBu"),
             ("Bytes per Vector", "coolwarm"),
+            ("CPU Utilization (%)", "plasma"),
             ("Insert Latency (ms)", "BuPu"),
             ("Update Latency (ms)", "GnBu"),
             ("Delete Latency (ms)", "OrRd"),
+            ("Batch Throughput (vec/s)", "crest"),
         ]
 
         # Generate one plot per metric, comparing all experiments
@@ -77,7 +93,7 @@ class BenchmarkVisualizer:
                 continue
 
             # Sanitize metric name for filename
-            filename_metric = metric_name.replace("@", "_").replace(" ", "_").replace("(", "").replace(")", "")
+            filename_metric = metric_name.replace("@", "_").replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
             
             generated_plots.append(self._create_grouped_bar_plot(
                 plot_df, 
