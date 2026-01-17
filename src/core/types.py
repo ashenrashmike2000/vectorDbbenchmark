@@ -376,10 +376,10 @@ class MetricsResult:
     def to_dict(self) -> Dict[str, Any]:
         """Convert all metrics to a flat dictionary."""
         result = {}
-        result.update({"quality_" + k: v for k, v in self.quality.to_dict().items()})
-        result.update({"perf_" + k: v for k, v in self.performance.to_dict().items()})
-        result.update({"resource_" + k: v for k, v in self.resource.to_dict().items()})
-        result.update({"ops_" + k: v for k, v in self.operational.to_dict().items()})
+        result.update(self.quality.to_dict())
+        result.update(self.performance.to_dict())
+        result.update(self.resource.to_dict())
+        result.update(self.operational.to_dict())
         result["scalability"] = self.scalability.to_dict()
         return result
 
@@ -424,6 +424,7 @@ class BenchmarkResult:
     # Identification
     experiment_name: str
     timestamp: datetime = field(default_factory=datetime.now)
+    retrieval_method: str = "vector_search"
 
     # Configuration
     database_info: Optional[DatabaseInfo] = None
@@ -447,18 +448,26 @@ class BenchmarkResult:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        flat_metrics = self.mean_metrics.to_dict() if self.mean_metrics else {}
+        
+        # Base dictionary
+        data = {
             "experiment_name": self.experiment_name,
             "timestamp": self.timestamp.isoformat(),
+            "retrieval_method": self.retrieval_method,
             "database": self.database_info.name if self.database_info else None,
             "dataset": self.dataset_info.name if self.dataset_info else None,
             "index_config": self.index_config.name if self.index_config else None,
             "num_runs": self.num_runs,
-            "mean_metrics": self.mean_metrics.to_dict() if self.mean_metrics else None,
             "hardware_info": self.hardware_info,
             "success": self.success,
             "error_message": self.error_message,
         }
+        
+        # Merge metrics
+        data.update(flat_metrics)
+        
+        return data
 
 
 # =============================================================================

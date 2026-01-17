@@ -334,10 +334,22 @@ class PgvectorAdapter(VectorDBInterface):
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._table_name:
             return {}
+        
+        stats = {
+            "dimensions": self._dimensions,
+            "index_type": self._index_config.type if self._index_config else None
+        }
+        
         with self._conn.cursor() as cur:
+            # Get count
             cur.execute(f"SELECT COUNT(*) FROM {self._table_name}")
-            count = cur.fetchone()[0]
-        return {"num_vectors": count, "dimensions": self._dimensions, "index_type": self._index_config.type if self._index_config else None}
+            stats["num_vectors"] = cur.fetchone()[0]
+            
+            # Get size in bytes
+            cur.execute(f"SELECT pg_total_relation_size('{self._table_name}')")
+            stats["index_size_bytes"] = cur.fetchone()[0]
+            
+        return stats
 
     def set_search_params(self, params: Dict[str, Any]) -> None:
         self._search_params.update(params)

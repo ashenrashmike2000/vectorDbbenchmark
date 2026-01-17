@@ -6,6 +6,9 @@ import uuid
 import json
 import logging
 import time
+import random
+import gc
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,6 +27,7 @@ from src.core.types import (
     MetricsResult,
     RunConfig,
     DistanceMetric,
+    ResourceMetrics,
 )
 from src.databases import get_database
 from src.datasets import get_dataset
@@ -99,19 +103,37 @@ class BenchmarkRunner:
 
         for dataset_name in datasets:
             console.print(f"\n[bold]Loading dataset: {dataset_name}[/bold]")
-            dataset = get_dataset(dataset_name, data_dir=self.config.dataset.data_dir)
-            dataset.ensure_downloaded()
+            try:
+                dataset = get_dataset(dataset_name, data_dir=self.config.dataset.data_dir)
+                dataset.ensure_downloaded()
 
-            for db_name in databases:
-                console.print(f"\n[bold cyan]Benchmarking: {db_name} on {dataset_name}[/bold cyan]")
+                for db_name in databases:
+                    console.print(f"\n[bold cyan]Benchmarking: {db_name} on {dataset_name}[/bold cyan]")
+                    # Flush stdout to ensure logs are captured before potential crash
+                    sys.stdout.flush()
 
-                try:
-                    result = self._run_single_benchmark(db_name, dataset, index_configs)
-                    results.append(result)
-                    self._print_summary(result)
-                except Exception as e:
-                    logger.error(f"Benchmark failed for {db_name}: {e}")
-                    console.print(f"[red]Error: {e}[/red]")
+                    try:
+                        result = self._run_single_benchmark(db_name, dataset, index_configs)
+                        results.append(result)
+                        self._print_summary(result)
+                        
+                        # Save intermediate results
+                        self.save_results()
+                        
+                    except Exception as e:
+                        logger.error(f"Benchmark failed for {db_name}: {e}")
+                        console.print(f"[red]Error: {e}[/red]")
+                    
+                    # Force garbage collection after each DB run
+                    gc.collect()
+
+                # Cleanup dataset memory
+                del dataset
+                gc.collect()
+                
+            except Exception as e:
+                logger.error(f"Failed to load or process dataset {dataset_name}: {e}")
+                console.print(f"[red]Dataset Error: {e}[/red]")
 
         self.results = results
         return results
@@ -131,6 +153,7 @@ class BenchmarkRunner:
 
         result = BenchmarkResult(
             experiment_name=f"{db_name}_{dataset.name}",
+            retrieval_method="vector_search",
             database_info=temp_db.info,  # FIXED: Populate database info
             dataset_info=dataset.info,
             hardware_info=self.hardware_info,
@@ -190,16 +213,79 @@ class BenchmarkRunner:
 
             console.print(f"\n  [yellow]Index: {idx_config.name}[/yellow]")
 
-            runs = []
-            for run_id in range(self.config.experiment.runs):
-                run_result = self._execute_run(
-                    db_name, db_config, idx_config, vectors, queries, ground_truth, run_id, metric
-                )
-                runs.append(run_result)
-                console.print(f"    Run {run_id + 1}: Recall@10={run_result.metrics.quality.recall_at_10:.4f}, "
-                            f"Latency_p50={run_result.metrics.performance.latency_p50:.2f}ms")
+            # =========================================================
+            # BUILD ONCE, SEARCH MANY
+            # =========================================================
+            db = None
+            try:
+                db = get_database(db_name, db_config)
+                db.connect()  # <--- FIXED: Explicitly connect
+                
+                # 1. Build Index (Once)
+                console.print("    [dim]Building index...[/dim]")
+                with ResourceMonitor() as build_monitor:
+                    build_time = db.create_index(
+                        vectors,
+                        index_config=idx_config,
+                        distance_metric=metric,
+                    )
 
-            result.runs.extend(runs)
+                # If the adapter has the smart wait method, use it
+                if db_name == "weaviate":
+                    # Removed 300s sleep as WeaviateAdapter now handles wait
+                    pass
+
+                # Capture Build Metrics
+                build_metrics = ResourceMetrics()
+                build_metrics.index_build_time_sec = build_time
+                build_metrics.ram_bytes_peak = build_monitor.peak_memory_bytes
+                
+                # Get index stats
+                stats = db.get_index_stats()
+                build_metrics.index_size_bytes = stats.get("index_size_bytes", 0)
+
+                # 2. Run Searches (Many)
+                runs = []
+                for run_id in range(self.config.experiment.runs):
+                    run_result = self._execute_search_run(
+                        db=db,
+                        db_name=db_name,
+                        index_config=idx_config,
+                        queries=queries,
+                        ground_truth=ground_truth,
+                        run_id=run_id,
+                        metric=metric,
+                        build_metrics=build_metrics,
+                        num_vectors=len(vectors)
+                    )
+                    runs.append(run_result)
+                    console.print(f"    Run {run_id + 1}: Recall@10={run_result.metrics.quality.recall_at_10:.4f}, "
+                                f"Latency_p50={run_result.metrics.performance.latency_p50:.2f}ms")
+                    
+                    # Flush logs
+                    sys.stdout.flush()
+
+                result.runs.extend(runs)
+
+            except Exception as e:
+                logger.exception(f"Benchmark failed for config {idx_config.name}: {e}")
+                console.print(f"[red]Error with config {idx_config.name}: {e}[/red]")
+            
+            finally:
+                # 3. Cleanup (Once)
+                if db:
+                    try:
+                        db.delete_index()
+                    except Exception as e:
+                        logger.error(f"Failed to delete index: {e}")
+                    
+                    try:
+                        db.disconnect()  # <--- FIXED: Explicitly disconnect
+                    except Exception as e:
+                        logger.error(f"Failed to disconnect: {e}")
+                
+                # Force GC after index cleanup
+                gc.collect()
 
         result.num_runs = len(result.runs)
 
@@ -209,23 +295,24 @@ class BenchmarkRunner:
 
         return result
 
-    def _execute_run(
+    def _execute_search_run(
         self,
+        db: VectorDBInterface,
         db_name: str,
-        db_config: Dict,
         index_config: IndexConfig,
-        vectors: np.ndarray,
         queries: np.ndarray,
         ground_truth: np.ndarray,
         run_id: int,
-        metric: DistanceMetric,  # FIXED: Added metric parameter
+        metric: DistanceMetric,
+        build_metrics: ResourceMetrics,
+        num_vectors: int,
     ) -> BenchmarkRun:
-        """Execute a single benchmark run."""
+        """Execute a single search benchmark run on an existing index."""
         run_config = RunConfig(
             database=db_name,
             dataset="",
             index_config=index_config,
-            distance_metric=metric,  # FIXED: Use passed metric
+            distance_metric=metric,
             k=100,
             num_queries=len(queries),
             run_id=run_id,
@@ -233,128 +320,99 @@ class BenchmarkRunner:
 
         start_time = time.perf_counter()
         metrics = MetricsResult()
+        
+        # Copy build metrics
+        metrics.resource = build_metrics
+
+        # Calculate Batch Throughput (derived from build time)
+        if build_metrics.index_build_time_sec > 0:
+            metrics.operational.insert_throughput_batch = num_vectors / build_metrics.index_build_time_sec
 
         try:
-            db = get_database(db_name, db_config)
+            # Warmup
+            warmup_queries = queries[:self.config.experiment.warmup_queries]
+            for q in warmup_queries:
+                db.search_single(q, k=10)
 
-            with db:
-                # Build index
-                with ResourceMonitor() as build_monitor:
-                    build_time = db.create_index(
-                        vectors,
-                        index_config,
-                        metric,  # FIXED: Use passed metric instead of hardcoded L2
-                    )
+            # Search with timing
+            k = 100
+            search_params = index_config.search_params
 
-                # If the adapter has the smart wait method, use it
-                if db_name == "weaviate":
-                    console.print("\n[yellow]⏳ Weaviate detected: Sleeping 300s to allow HNSW index build...[/yellow]")
-                    time.sleep(300)
-
-                metrics.resource.index_build_time_sec = build_time
-                metrics.resource.ram_bytes_peak = build_monitor.peak_memory_bytes
-
-                # === NEW: Calculate Batch Throughput ===
-                if build_time > 0:
-                    metrics.operational.insert_throughput_batch = len(vectors) / build_time
-                # =======================================
-
-                # Warmup
-                warmup_queries = queries[:self.config.experiment.warmup_queries]
-                for q in warmup_queries:
-                    db.search_single(q, k=10)
-
-                # Search with timing
-                k = 100
-                search_params = index_config.search_params
-
-                # Get first search param value if it's a list
-                if search_params:
-                    resolved_params = {}
-                    for key, value in search_params.items():
-                        if isinstance(value, list) and len(value) > 0:
-                            resolved_params[key] = value[len(value) // 2]  # Use middle value
-                        else:
-                            resolved_params[key] = value
-                    search_params = resolved_params
-
-                indices, distances, latencies = db.search(queries, k, search_params)
-
-                # Compute quality metrics
-                metrics.quality = compute_all_quality_metrics(indices, ground_truth)
-
-                # Compute performance metrics
-                metrics.performance = compute_all_performance_metrics(latencies)
-
-                # ======================================================
-                # NEW: CRUD Operations Benchmark (Ops Metrics)
-                # ======================================================
-                console.print("    [dim]Measuring CRUD Operations...[/dim]")
-
-                # 1. Measure Single Insert Latency
-                # Create a dummy vector (random or from queries)
-                # Qdrant and Weaviate usually prefer/require UUIDs
-                # Pgvector, Milvus, Faiss usually prefer Integers
-                if db.name in ["qdrant", "weaviate", "lancedb"]:
-                    # Generate a REAL valid UUID to satisfy Qdrant/Weaviate
-                    dummy_id = str(uuid.uuid4())
-                else:
-                    # Use a massive integer to avoid collision with SIFT1M (0 to 999,999)
-                    # 10 million is safe
-                    dummy_id = "10000000"
-                dummy_vec = queries[0]  # Use first query vector as a test insert
-
-                t0 = time.perf_counter()
-                try:
-                    # You must implement 'insert_one' in your adapters!
-                    if hasattr(db, 'insert_one'):
-                        db.insert_one(dummy_id, dummy_vec)
-                        # CORRECTED: .operational.insert_latency_single_ms
-                        metrics.operational.insert_latency_single_ms = (time.perf_counter() - t0) * 1000
+            # Get first search param value if it's a list
+            if search_params:
+                resolved_params = {}
+                for key, value in search_params.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        resolved_params[key] = value[len(value) // 2]  # Use middle value
                     else:
-                        metrics.operational.insert_latency_single_ms = 0.0
-                except Exception as e:
-                    logger.warning(f"Insert ops failed: {e}")
+                        resolved_params[key] = value
+                search_params = resolved_params
 
-                # 2. Measure Update Latency
-                t0 = time.perf_counter()
-                try:
-                    if hasattr(db, 'update_one'):
-                        updated_vec = dummy_vec + 0.01
-                        db.update_one(dummy_id, updated_vec)
+            indices, distances, latencies = db.search(queries, k, search_params)
 
-                        latency_ms = (time.perf_counter() - t0) * 1000
-                        metrics.operational.update_latency_ms = latency_ms
+            # Compute quality metrics
+            metrics.quality = compute_all_quality_metrics(indices, ground_truth)
 
-                        # === NEW: Calculate Throughput ===
-                        if latency_ms > 0:
-                            metrics.operational.update_throughput = 1000 / latency_ms
-                except Exception as e:
-                    logger.warning(f"Update ops failed: {e}")
+            # Compute performance metrics
+            metrics.performance = compute_all_performance_metrics(latencies)
 
-                # 3. Measure Delete Latency
-                t0 = time.perf_counter()
-                try:
-                    if hasattr(db, 'delete_one'):
-                        db.delete_one(dummy_id)
+            # ======================================================
+            # CRUD Operations Benchmark (Ops Metrics)
+            # ======================================================
+            # console.print("    [dim]Measuring CRUD Operations...[/dim]")
 
-                        latency_ms = (time.perf_counter() - t0) * 1000
-                        metrics.operational.delete_latency_ms = latency_ms
+            # Generate a random dummy vector for CRUD operations to avoid data leakage
+            # Use the same dimension as queries
+            dim = queries.shape[1]
+            dummy_vec = np.random.rand(dim).astype(np.float32)
 
-                        # === NEW: Calculate Throughput ===
-                        if latency_ms > 0:
-                            metrics.operational.delete_throughput = 1000 / latency_ms
-                except Exception as e:
-                    logger.warning(f"Delete ops failed: {e}")
+            # Warmup for CRUD
+            try:
+                if hasattr(db, 'insert_one') and hasattr(db, 'delete_one'):
+                    warmup_id = "99999999" # Distinct from test ID
+                    db.insert_one(warmup_id, dummy_vec)
+                    db.delete_one(warmup_id)
+            except Exception:
+                pass
 
-                # ======================================================
+            # 1. Measure Single Insert Latency
+            # Use a large random integer to avoid collisions and work with all DBs
+            dummy_id = str(random.randint(10_000_000, 99_999_999))
 
-                # Get index stats
-                stats = db.get_index_stats()
-                metrics.resource.index_size_bytes = stats.get("index_size_bytes", 0)
+            t0 = time.perf_counter()
+            try:
+                if hasattr(db, 'insert_one'):
+                    db.insert_one(dummy_id, dummy_vec)
+                    metrics.operational.insert_latency_single_ms = (time.perf_counter() - t0) * 1000
+                else:
+                    metrics.operational.insert_latency_single_ms = 0.0
+            except Exception as e:
+                logger.warning(f"Insert ops failed: {e}")
 
-                # Cleanup
-                db.delete_index()
+            # 2. Measure Update Latency
+            t0 = time.perf_counter()
+            try:
+                if hasattr(db, 'update_one'):
+                    updated_vec = dummy_vec + 0.01
+                    db.update_one(dummy_id, updated_vec)
+                    latency_ms = (time.perf_counter() - t0) * 1000
+                    metrics.operational.update_latency_ms = latency_ms
+                    if latency_ms > 0:
+                        metrics.operational.update_throughput = 1000 / latency_ms
+            except Exception as e:
+                logger.warning(f"Update ops failed: {e}")
+
+            # 3. Measure Delete Latency
+            t0 = time.perf_counter()
+            try:
+                if hasattr(db, 'delete_one'):
+                    db.delete_one(dummy_id)
+                    latency_ms = (time.perf_counter() - t0) * 1000
+                    metrics.operational.delete_latency_ms = latency_ms
+                    if latency_ms > 0:
+                        metrics.operational.delete_throughput = 1000 / latency_ms
+            except Exception as e:
+                logger.warning(f"Delete ops failed: {e}")
 
             success = True
             error_msg = None
@@ -415,12 +473,16 @@ class BenchmarkRunner:
         if not result.mean_metrics:
             return
 
-        table = Table(title=f"Results: {result.experiment_name}")
+        table = Table(
+            title=f"Results: {result.experiment_name}",
+            caption="Recall is normalized by total ground truth size (typically 100). Precision is # Relevant / K."
+        )
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
 
         m = result.mean_metrics
         table.add_row("Recall@10", f"{m.quality.recall_at_10:.4f}")
+        table.add_row("Precision@10", f"{m.quality.precision_at_10:.4f}")
         table.add_row("Recall@100", f"{m.quality.recall_at_100:.4f}")
         table.add_row("MRR", f"{m.quality.mrr:.4f}")
         table.add_row("Latency p50 (ms)", f"{m.performance.latency_p50:.2f}")

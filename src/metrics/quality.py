@@ -49,10 +49,8 @@ def compute_recall_at_k(
         else:
             intersection = len(retrieved_k & true_neighbors)
 
-            # --- THE FIX ---
-            # We divide by 'min(k, len)' so the score is relative to what we asked for.
-            # If we asked for 10 items, and found 10, we get 1.0.
-            denominator = min(k, len(true_neighbors))
+            # Standard Recall Definition: Intersection / Total Relevant
+            denominator = len(true_neighbors)
 
             if denominator == 0:
                 recalls.append(0.0)
@@ -138,7 +136,7 @@ def compute_ndcg_at_k(
     retrieved: NDArray[np.int64],
     ground_truth: NDArray[np.int64],
     k: int,
-    relevance_scores: Optional[NDArray[np.float32]] = None,
+    relevance_scores: Optional[NDArray[np.float64]] = None,
 ) -> float:
     """
     Compute Normalized Discounted Cumulative Gain (NDCG@K).
@@ -152,7 +150,6 @@ def compute_ndcg_at_k(
         retrieved: Retrieved indices of shape (n_queries, k)
         ground_truth: True neighbor indices
         k: Number of results to consider
-        relevance_scores: Optional graded relevance (default: binary)
 
     Returns:
         Mean NDCG@K
@@ -173,8 +170,7 @@ def compute_ndcg_at_k(
         dcg = 0.0
         for rank, idx in enumerate(retrieved[i, :k], start=1):
             if idx in all_true_neighbors:
-                # Binary relevance (1.0) unless scores provided
-                rel = 1.0 if relevance_scores is None else relevance_scores[i, rank - 1]
+                rel = 1.0
                 dcg += rel / np.log2(rank + 1)
 
         # Compute IDCG (ideal DCG)
@@ -223,16 +219,18 @@ def compute_map_at_k(
 
         hits = 0
         precision_sum = 0.0
+        found_relevant = set()
 
-        for rank, idx in enumerate(retrieved[i, :k], start=1):
-            if idx in true_neighbors:
+        # We track `found_relevant` to ensure that each distinct relevant item contributes at most once to Average Precision.
+        for rank, idx in enumerate(retrieved[i, :k], start=1): # Iterate up to k
+            if idx in true_neighbors and idx not in found_relevant:
                 hits += 1
-                precision_at_rank = hits / rank
-                precision_sum += precision_at_rank
+                precision_sum += hits / rank
+                found_relevant.add(idx)
 
-        # Average over relevant items found or k?
-        # Standard MAP divides by min(len(truth), k) or len(truth)
-        # We divide by number of relevant items found in top k
+        # Normalize by the maximum possible number of distinct relevant items that can appear in the top-k results, i.e.,
+        # min(len(true_neighbors), k).
+        # The duplicate handling above (via `found_relevant`) ensures each relevant item contributes at most once to the precision sum.
         num_relevant = min(len(true_neighbors), k)
         if num_relevant > 0:
             average_precisions.append(precision_sum / num_relevant)

@@ -5,6 +5,7 @@ Compatible with Weaviate Python Client v4.
 
 import time
 import uuid
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from src.core.base import VectorDBInterface
@@ -16,10 +17,14 @@ try:
     import weaviate
     from weaviate.classes import config as wvc
     from weaviate.classes import query as wvq
+    from weaviate.classes import aggregate as wva
     from weaviate.classes.init import AdditionalConfig, Timeout
     WEAVIATE_AVAILABLE = True
 except ImportError:
     WEAVIATE_AVAILABLE = False
+
+# Suppress Weaviate DeprecationWarnings for cleaner logs
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="weaviate")
 
 @register_database("weaviate")
 class WeaviateAdapter(VectorDBInterface):
@@ -32,6 +37,7 @@ class WeaviateAdapter(VectorDBInterface):
         self._client = None
         self._collection = None
         self._collection_name: str = ""
+        # Reverted named vector to ensure stability with current client version
 
     @property
     def name(self) -> str: return "weaviate"
@@ -76,10 +82,10 @@ class WeaviateAdapter(VectorDBInterface):
             self._client.close()
         self._is_connected = False
 
-    def create_index(self, vectors, index_config, metric, metadata=None, ids=None) -> float:
+    def create_index(self, vectors, index_config, distance_metric, metadata=None, ids=None) -> float:
         self.validate_vectors(vectors)
         self._dimensions = vectors.shape[1]
-        self._distance_metric = metric
+        self._distance_metric = distance_metric
 
         prefix = self.config.get("collection", {}).get("name_prefix", "Benchmark")
         self._collection_name = f"{prefix}_{uuid.uuid4().hex[:8]}"
@@ -93,12 +99,12 @@ class WeaviateAdapter(VectorDBInterface):
             DistanceMetric.IP: wvc.VectorDistances.DOT,
         }
 
-        # Create Collection
+        # Create Collection (Reverted to deprecated but working arguments)
         self._client.collections.create(
             name=self._collection_name,
             vectorizer_config=wvc.Configure.Vectorizer.none(),
             vector_index_config=wvc.Configure.VectorIndex.hnsw(
-                distance_metric=dist_map.get(metric, wvc.VectorDistances.L2_SQUARED),
+                distance_metric=dist_map.get(distance_metric, wvc.VectorDistances.L2_SQUARED),
                 ef_construction=index_config.params.get("ef_construct", 128),
                 max_connections=index_config.params.get("m", 16),
                 cleanup_interval_seconds=300
@@ -124,7 +130,7 @@ class WeaviateAdapter(VectorDBInterface):
 
                 batch.add_object(
                     properties={"vec_id": vec_id_int},
-                    vector=vector,
+                    vector=vector.tolist(), # Reverted to simple vector
                     uuid=uid
                 )
 
@@ -148,6 +154,9 @@ class WeaviateAdapter(VectorDBInterface):
             except Exception:
                 pass
             time.sleep(5)
+        
+        # Stabilization wait (heuristic)
+        time.sleep(60)
 
         self._num_vectors = len(vectors)
         return time.perf_counter() - start_time
@@ -180,6 +189,7 @@ class WeaviateAdapter(VectorDBInterface):
                         res = self._collection.query.near_vector(
                             near_vector=query,
                             limit=k,
+                            # target_vector removed
                             return_metadata=wvq.MetadataQuery(distance=True),
                             return_properties=["vec_id"]
                         )
@@ -220,7 +230,16 @@ class WeaviateAdapter(VectorDBInterface):
 
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection: return {}
-        return {"num_vectors": self._dimensions}
+        
+        stats = {"dimensions": self._dimensions}
+        try:
+            # Use aggregation to get total count
+            agg = self._collection.aggregate.over_all(total_count=True)
+            stats["num_vectors"] = agg.total_count
+        except Exception:
+            stats["num_vectors"] = 0
+            
+        return stats
 
     def set_search_params(self, params): pass
     def get_search_params(self): return {}
@@ -232,11 +251,12 @@ class WeaviateAdapter(VectorDBInterface):
         # Replicate the UUID generation logic from create_index
         try:
             vec_id_int = int(id) if str(id).isdigit() else 0
-            uid = str(uuid.uuid4())
+            # FIX: Use deterministic UUID to match delete_one
+            uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(vec_id_int)))
 
             self._collection.data.insert(
                 properties={"vec_id": vec_id_int},
-                vector=vector.tolist(),
+                vector=vector.tolist(), # Reverted to simple vector
                 uuid=uid
             )
         except Exception as e:
@@ -254,5 +274,15 @@ class WeaviateAdapter(VectorDBInterface):
 
     def update_one(self, id: str, vector: np.ndarray):
         """Updates a single object."""
-        # Weaviate supports replace, but for benchmark consistency we do insert (upsert)
-        self.insert_one(id, vector)
+        try:
+            vec_id_int = int(id) if str(id).isdigit() else 0
+            uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(vec_id_int)))
+
+            # FIX: Use replace instead of insert for updates
+            self._collection.data.replace(
+                properties={"vec_id": vec_id_int},
+                vector=vector.tolist(),
+                uuid=uid
+            )
+        except Exception as e:
+            print(f"Weaviate update_one failed: {e}")

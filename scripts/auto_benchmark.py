@@ -5,23 +5,27 @@ import sys
 import os
 import shutil
 
+# Add project root to allow importing project modules
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.append(PROJECT_ROOT)
+
+from src.reporting.exporter import CSVExporter
+
 # =============================================================================
 # SYSTEM CONFIGURATION
 # =============================================================================
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-
 
 def get_root_path(filename):
     return os.path.join(PROJECT_ROOT, filename)
 
 
 DOCKER_MAP = {
-    "milvus": get_root_path("milvus-docker-compose.yml"),
-    "qdrant": get_root_path("qdrant-docker-compose.yml"),
+    "chroma": get_root_path("chroma-docker-compose.yml"),
     "weaviate": get_root_path("weaviate-docker-compose.yml"),
     "pgvector": get_root_path("pgvector-docker-compose.yml"),
-    "chroma": get_root_path("chroma-docker-compose.yml"),
+    "qdrant": get_root_path("qdrant-docker-compose.yml"),
+    "milvus": get_root_path("milvus-docker-compose.yml"),
     "lancedb": None,
     "faiss": None
 }
@@ -48,13 +52,21 @@ def cleanup_host_volumes():
     if os.path.exists(vol_path):
         print(f"🧹 Deleting local volumes folder: {vol_path}...")
         try:
-            # Python's way of doing 'sudo rm -rf'
             shutil.rmtree(vol_path)
         except PermissionError:
-            # If root created the files, Python might fail. Try shell command.
             run_command_simple(f"sudo rm -rf \"{vol_path}\"")
         except Exception as e:
             print(f"⚠️ Warning: Could not delete volumes: {e}")
+
+def cleanup_results_csv():
+    """Deletes the main results.csv to prevent schema conflicts."""
+    csv_path = os.path.join(PROJECT_ROOT, "results", "results.csv")
+    if os.path.exists(csv_path):
+        print(f"🧹 Deleting old results.csv file...")
+        try:
+            os.remove(csv_path)
+        except Exception as e:
+            print(f"⚠️ Warning: Could not delete results.csv: {e}")
 
 
 def wait_for_port(port, timeout=60):
@@ -80,38 +92,22 @@ def manage_container(db_name, action):
     compose_file = DOCKER_MAP.get(db_name)
     if not compose_file: return
 
-    # =========================================================
-    # PART 1: EXECUTE DOCKER COMMANDS
-    # =========================================================
     if action == "up":
-        # 1. CLEANUP OLD DATA
         cleanup_host_volumes()
-
-        # 2. START CONTAINER
         print(f"🚀 Starting {db_name}...")
         run_command_simple(f"docker-compose -f \"{compose_file}\" up -d")
-
     elif action == "restart":
         print(f"♻️  RESET: Restarting {db_name}...")
         run_command_simple(f"docker-compose -f \"{compose_file}\" down -v")
-
-        # 1. CLEANUP DATA BEFORE RESTARTING
         cleanup_host_volumes()
-
         time.sleep(5)
         run_command_simple(f"docker-compose -f \"{compose_file}\" up -d")
-
     elif action == "down":
         print(f"🛑 Stopping {db_name}...")
         run_command_simple(f"docker-compose -f \"{compose_file}\" down -v")
-
-        # 1. FINAL CLEANUP
         cleanup_host_volumes()
         return
 
-    # =========================================================
-    # PART 2: WAIT FOR READINESS
-    # =========================================================
     if db_name == "milvus":
         print("⏳ Polling Milvus port 19530...")
         if wait_for_port(19530, timeout=500):
@@ -142,52 +138,62 @@ def main():
     parser.add_argument("--export", nargs='+', default=["json"], help="Export formats")
     args = parser.parse_args()
 
-    # Expand 'all' keyword
-    target_databases = []
-    if 'all' in args.database:
-        target_databases = list(DOCKER_MAP.keys())
-    else:
-        target_databases = args.database
+    target_databases = list(DOCKER_MAP.keys()) if 'all' in args.database else args.database
 
     # Initial Cleanup
     print("🧹 Cleaning up workspace...")
     for db, file in DOCKER_MAP.items():
         if file and os.path.exists(file): run_command_simple(f"docker-compose -f \"{file}\" down -v")
     cleanup_host_volumes()
+    cleanup_results_csv()
 
     try:
-        # === OUTER LOOP: Databases ===
         for db in target_databases:
             print(f"\n{'=' * 60}\n PREPARING BENCHMARK FOR: {db.upper()}\n{'=' * 60}")
             manage_container(db, "up")
 
             runner_script = get_root_path("scripts/run_benchmark.py")
-            export_str = " ".join(args.export)
+            
+            # FIX: Remove 'csv' and 'plots' from intermediate runs
+            export_formats = [fmt for fmt in args.export if fmt not in ['csv', 'plots']]
+            export_str = " ".join(export_formats)
 
-            # === INNER LOOP: Datasets ===
             for i, dataset in enumerate(args.dataset):
-
                 print(f"\n▶️  Running: {db} on {dataset}...")
                 cmd = (
                     f"\"{sys.executable}\" \"{runner_script}\" --database {db} --dataset {dataset} --runs {args.runs} --export {export_str}")
-
                 try:
                     run_benchmark_command(cmd)
                     print("✅ Benchmark Run Successful.")
                 except subprocess.CalledProcessError:
                     print(f"❌ Run Failed (Exit Code Error). Moving to next dataset.")
 
-                # --- SWITCHING LOGIC ---
-                is_last_dataset = (i == len(args.dataset) - 1)
-
-                if not is_last_dataset:
+                if i < len(args.dataset) - 1:
                     if DOCKER_MAP.get(db):
                         manage_container(db, "restart")
                     else:
                         print("❄️  Cooling down...")
                         time.sleep(10)
-
             manage_container(db, "down")
+
+        # === FINAL STEP: Compile CSV and Generate Plots ===
+        if 'csv' in args.export:
+            print(f"\n{'=' * 60}\n📄 COMPILING CSV\n{'=' * 60}")
+            CSVExporter().compile_and_export(
+                json_dir=get_root_path("results"),
+                output_path=get_root_path("results/results.csv")
+            )
+
+        if 'plots' in args.export:
+            print(f"\n{'=' * 60}\n📊 GENERATING PLOTS\n{'=' * 60}")
+            plot_script = get_root_path("scripts/generate_plots.py")
+            db_args = " ".join(target_databases)
+            ds_args = " ".join(args.dataset)
+            cmd = f"\"{sys.executable}\" \"{plot_script}\" --database {db_args} --dataset {ds_args}"
+            try:
+                run_benchmark_command(cmd)
+            except subprocess.CalledProcessError:
+                print(f"❌ Plot generation failed.")
 
     except KeyboardInterrupt:
         force_cleanup_all()
