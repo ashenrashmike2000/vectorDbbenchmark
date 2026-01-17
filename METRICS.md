@@ -77,7 +77,8 @@ These metrics evaluate how "correct" the search results are compared to a pre-co
 
 ### **Index Size (MB)**
 
-*   **Definition**: The estimated size of the vector index on disk or in memory, in megabytes. The accuracy depends on the database adapter.
+*   **Definition**: The estimated size of the vector index on disk or in memory, in megabytes.
+*   **Note**: The accuracy of this metric varies by database. For **LanceDB** and **pgvector**, this value is accurate. For **Milvus**, it reflects the size of persisted segments. For **Qdrant, Weaviate, Chroma, and FAISS**, this is an **estimation** of the raw vector data size (`num_vectors * dimensions * 4 bytes`) and does not include the HNSW graph overhead.
 
 ### **RAM Peak (MB)**
 
@@ -89,7 +90,7 @@ These metrics evaluate how "correct" the search results are compared to a pre-co
 
 ### **Bytes per Vector**
 
-*   **Definition**: `index_size_bytes / num_vectors`. The average number of bytes used to store a single vector and its associated index overhead.
+*   **Definition**: `index_size_bytes / num_vectors`. The average number of bytes used to store a single vector and its associated index overhead. The accuracy depends on the `Index Size` metric.
 
 ---
 

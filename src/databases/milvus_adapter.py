@@ -267,31 +267,39 @@ class MilvusAdapter(VectorDBInterface):
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection: return {}
         
+        self._collection.flush()
+        num_vectors = self._collection.num_entities
+        total_size = 0
+
+        # Try modern .stats() method first
         try:
-            # Flush to ensure all data is on disk for an accurate size measurement
-            self._collection.flush()
             stats = self._collection.stats()
-            
-            # The 'partitions_stats' contains segment info, including size
-            total_size = 0
             if "partitions_stats" in stats:
                 for partition in stats["partitions_stats"]:
                     if "segments_stats" in partition:
                         for segment in partition["segments_stats"]:
                             total_size += int(segment.get("data_size", 0))
-            
-            return {
-                "num_vectors": stats.get("row_count", 0),
-                "dimensions": self._dimensions,
-                "index_size_bytes": total_size
-            }
-        except Exception as e:
-            print(f"⚠️ Milvus: Could not get detailed stats: {e}. Falling back to basic count.")
-            return {
-                "num_vectors": self._collection.num_entities,
-                "dimensions": self._dimensions,
-                "index_size_bytes": 0
-            }
+        except (MilvusException, AttributeError):
+            total_size = 0 # Reset size if first method fails
+
+        # If .stats() fails or returns 0, try older segment info method
+        if total_size == 0:
+            try:
+                segments_info = utility.get_query_segment_info(self._collection_name)
+                total_size = sum(segment.mem_size for segment in segments_info)
+            except (MilvusException, AttributeError):
+                total_size = 0 # Reset size if second method also fails
+
+        # If all API calls fail, fall back to estimation
+        if total_size == 0 and num_vectors > 0:
+            print(f"⚠️ Milvus: Could not get detailed stats via API. Falling back to estimation.")
+            total_size = num_vectors * self._dimensions * 4  # float32
+
+        return {
+            "num_vectors": num_vectors,
+            "dimensions": self._dimensions,
+            "index_size_bytes": total_size
+        }
 
     def set_search_params(self, params: Dict[str, Any]) -> None:
         self._search_params = params
@@ -300,20 +308,12 @@ class MilvusAdapter(VectorDBInterface):
         return self._search_params
 
     def insert_one(self, id: str, vector: np.ndarray):
-        try:
-            int_id = int(id) if str(id).isdigit() else 999999
-            self._collection.insert([[int_id], [vector]])
-        except Exception as e:
-            print(f"Milvus insert_one failed: {e}")
-
-    def delete_one(self, id: str):
-        try:
-            int_id = int(id) if str(id).isdigit() else 999999
-            expr = f"id in [{int_id}]"
-            self._collection.delete(expr)
-        except Exception:
-            pass
+        # Milvus requires int64 for primary key. If ID is not int, hash it.
+        milvus_id = int(id) if str(id).isdigit() else hash(id) % (2**63 - 1)
+        self._collection.insert([[milvus_id], [vector]])
+        self._collection.flush()
 
     def update_one(self, id: str, vector: np.ndarray):
-        self.delete_one(id)
-        self.insert_one(id, vector)
+        milvus_id = int(id) if str(id).isdigit() else hash(id) % (2**63 - 1)
+        expr = f"id in [{milvus_id}]"
+        self._collection.delete(expr)
