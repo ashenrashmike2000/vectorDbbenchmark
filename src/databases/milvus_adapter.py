@@ -268,23 +268,25 @@ class MilvusAdapter(VectorDBInterface):
         if not self._collection: return {}
         
         try:
+            # Flush to ensure all data is on disk for an accurate size measurement
+            self._collection.flush()
             stats = self._collection.stats()
-            index_size = 0
-            # The stats format can be complex, we need to find the index size
+            
+            # The 'partitions_stats' contains segment info, including size
+            total_size = 0
             if "partitions_stats" in stats:
                 for partition in stats["partitions_stats"]:
                     if "segments_stats" in partition:
                         for segment in partition["segments_stats"]:
-                            if "indexes_stats" in segment:
-                                for index in segment["indexes_stats"]:
-                                    index_size += int(index.get("size", 0))
+                            total_size += int(segment.get("data_size", 0))
             
             return {
                 "num_vectors": stats.get("row_count", 0),
                 "dimensions": self._dimensions,
-                "index_size_bytes": index_size
+                "index_size_bytes": total_size
             }
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ Milvus: Could not get detailed stats: {e}. Falling back to basic count.")
             return {
                 "num_vectors": self._collection.num_entities,
                 "dimensions": self._dimensions,
