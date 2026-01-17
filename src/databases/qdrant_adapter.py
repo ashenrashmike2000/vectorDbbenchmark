@@ -371,9 +371,21 @@ class QdrantAdapter(VectorDBInterface):
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection_name: return {}
         info = self._client.get_collection(self._collection_name)
+        
+        # The CollectionInfo object in qdrant-client > 1.7.0 has a vectors_config field
+        # which is a dict. The size is under the 'default' key if unnamed.
+        vector_size = 0
+        if hasattr(info.vectors_config, 'params_map'): # For client < 1.7
+            vector_size = info.vectors_config.params_map['default'].size
+        elif hasattr(info, 'vectors_config') and 'default' in info.vectors_config: # For client >= 1.7
+            vector_size = info.vectors_config['default'].params.size
+        else: # Fallback
+            vector_size = self._dimensions or 0
+
         return {
             "num_vectors": info.points_count,
-            "dimensions": info.config.params.vectors.size,
+            "dimensions": vector_size,
+            "index_size_bytes": info.segments_count * (info.points_count * vector_size * 4), # Rough estimation
             "index_type": "HNSW",
             "distance_metric": self._distance_metric.value if self._distance_metric else None,
             "status": info.status.value,

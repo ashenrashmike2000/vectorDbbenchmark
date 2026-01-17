@@ -262,7 +262,12 @@ class ChromaAdapter(VectorDBInterface):
 
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection: return {}
-        return {"num_vectors": self._collection.count(), "dimensions": self._dimensions}
+        count = self._collection.count()
+        return {
+            "num_vectors": count,
+            "dimensions": self._dimensions,
+            "index_size_bytes": count * self._dimensions * 4 # Estimation
+        }
 
     def set_search_params(self, params: Dict[str, Any]) -> None:
         self._search_params = params
