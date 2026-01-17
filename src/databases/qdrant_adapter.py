@@ -372,12 +372,14 @@ class QdrantAdapter(VectorDBInterface):
         if not self._collection_name: return {}
         info = self._client.get_collection(self._collection_name)
         
+        # Use the compatible 'points_count' attribute
+        points_count = info.points_count or 0
+        
         # Estimate size as num_vectors * dimensions * 4 bytes (for float32)
-        # This is a baseline and doesn't include HNSW graph overhead.
-        estimated_size = info.vectors_count * self._dimensions * 4 if info.vectors_count and self._dimensions else 0
+        estimated_size = points_count * self._dimensions * 4 if self._dimensions else 0
         
         return {
-            "num_vectors": info.points_count,
+            "num_vectors": points_count,
             "dimensions": self._dimensions,
             "index_size_bytes": estimated_size,
             "index_type": "HNSW",
