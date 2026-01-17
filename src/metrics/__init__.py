@@ -29,7 +29,6 @@ from src.metrics.performance import (
 from src.metrics.resource import (
     measure_memory_usage,
     measure_disk_usage,
-    measure_cpu_usage,
     compute_all_resource_metrics,
 )
 
@@ -48,6 +47,5 @@ __all__ = [
     "compute_all_performance_metrics",
     "measure_memory_usage",
     "measure_disk_usage",
-    "measure_cpu_usage",
     "compute_all_resource_metrics",
 ]

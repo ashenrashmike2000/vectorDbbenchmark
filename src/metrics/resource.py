@@ -4,9 +4,10 @@ Resource metrics for memory, disk, and CPU usage evaluation.
 
 import os
 import time
+import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
-
+from typing import Any, Callable, Dict, List, Optional
+import numpy as np
 import psutil
 
 from src.core.types import ResourceMetrics
@@ -59,143 +60,60 @@ def measure_disk_usage(path: str) -> Dict[str, int]:
     return {"size": total_size, "files": file_count}
 
 
-def measure_cpu_usage(duration_sec: float = 1.0) -> Dict[str, float]:
-    """
-    Measure CPU usage over a duration.
-
-    Args:
-        duration_sec: Duration to measure
-
-    Returns:
-        Dictionary with CPU metrics
-    """
-    process = psutil.Process(os.getpid())
-
-    cpu_times_start = process.cpu_times()
-    time.sleep(duration_sec)
-    cpu_times_end = process.cpu_times()
-
-    user_time = cpu_times_end.user - cpu_times_start.user
-    system_time = cpu_times_end.system - cpu_times_start.system
-
-    # CPU percent over the interval
-    cpu_percent = process.cpu_percent(interval=None)
-
-    return {
-        "user_time_sec": user_time,
-        "system_time_sec": system_time,
-        "total_time_sec": user_time + system_time,
-        "percent": cpu_percent,
-        "num_threads": process.num_threads(),
-    }
-
-
 class ResourceMonitor:
     """
     Context manager for monitoring resource usage during operations.
-
-    Example:
-        with ResourceMonitor() as monitor:
-            # Do some work
-            pass
-        print(monitor.peak_memory_bytes)
     """
 
-    def __init__(self, sample_interval_sec: float = 0.1):
-        """
-        Initialize resource monitor.
-
-        Args:
-            sample_interval_sec: Sampling interval for peak detection
-        """
+    def __init__(self, sample_interval_sec: float = 0.5):
         self.sample_interval = sample_interval_sec
         self.process = psutil.Process(os.getpid())
+        self._monitoring = False
+        self._thread: Optional[threading.Thread] = None
 
-        self._start_memory = 0
-        self._peak_memory = 0
-        self._start_cpu_times = None
+        self.cpu_percents: List[float] = []
+        self.peak_memory_bytes = 0
         self._start_time = 0
         self._end_time = 0
-        self._monitoring = False
+
+    def _monitor(self):
+        """Background thread function to sample resources."""
+        self.peak_memory_bytes = self.process.memory_info().rss
+        # Set interval to 0 for the first call to get an initial reading
+        psutil.cpu_percent(interval=None)
+
+        while self._monitoring:
+            # CPU Usage
+            self.cpu_percents.append(psutil.cpu_percent(interval=self.sample_interval))
+
+            # Memory Usage
+            current_mem = self.process.memory_info().rss
+            if current_mem > self.peak_memory_bytes:
+                self.peak_memory_bytes = current_mem
 
     def __enter__(self):
-        self._start_memory = self.process.memory_info().rss
-        self._peak_memory = self._start_memory
-        self._start_cpu_times = self.process.cpu_times()
         self._start_time = time.perf_counter()
         self._monitoring = True
+        self._thread = threading.Thread(target=self._monitor, daemon=True)
+        self._thread.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._end_time = time.perf_counter()
         self._monitoring = False
-        # Final memory sample
-        current = self.process.memory_info().rss
-        self._peak_memory = max(self._peak_memory, current)
+        if self._thread:
+            self._thread.join(timeout=self.sample_interval * 2)
+        self._end_time = time.perf_counter()
         return False
 
     @property
     def elapsed_sec(self) -> float:
         """Elapsed time in seconds."""
-        if self._monitoring:
-            return time.perf_counter() - self._start_time
         return self._end_time - self._start_time
 
     @property
-    def memory_delta_bytes(self) -> int:
-        """Memory change from start."""
-        current = self.process.memory_info().rss
-        return current - self._start_memory
-
-    @property
-    def peak_memory_bytes(self) -> int:
-        """Peak memory usage."""
-        return self._peak_memory
-
-    @property
-    def cpu_time_sec(self) -> float:
-        """Total CPU time used."""
-        current = self.process.cpu_times()
-        user = current.user - self._start_cpu_times.user
-        system = current.system - self._start_cpu_times.system
-        return user + system
-
-    def sample(self) -> None:
-        """Take a memory sample (call periodically for accurate peak)."""
-        if self._monitoring:
-            current = self.process.memory_info().rss
-            self._peak_memory = max(self._peak_memory, current)
-
-
-def measure_index_build(
-    build_fn: Callable,
-    index_path: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Measure resource usage during index building.
-
-    Args:
-        build_fn: Function that builds the index
-        index_path: Path where index is stored (for disk measurement)
-
-    Returns:
-        Dictionary with build metrics
-    """
-    with ResourceMonitor() as monitor:
-        build_fn()
-
-    result = {
-        "build_time_sec": monitor.elapsed_sec,
-        "memory_delta_bytes": monitor.memory_delta_bytes,
-        "peak_memory_bytes": monitor.peak_memory_bytes,
-        "cpu_time_sec": monitor.cpu_time_sec,
-    }
-
-    if index_path:
-        disk_usage = measure_disk_usage(index_path)
-        result["disk_bytes"] = disk_usage["size"]
-
-    return result
+    def avg_cpu_percent(self) -> float:
+        """Average CPU utilization during the monitoring period."""
+        return np.mean(self.cpu_percents) if self.cpu_percents else 0.0
 
 
 def compute_all_resource_metrics(
@@ -209,18 +127,6 @@ def compute_all_resource_metrics(
 ) -> ResourceMetrics:
     """
     Compute all resource metrics.
-
-    Args:
-        build_time_sec: Index build time
-        index_size_bytes: Index size in memory
-        disk_bytes: Disk usage
-        ram_bytes_peak: Peak RAM usage
-        ram_bytes_steady: Steady-state RAM
-        num_vectors: Number of indexed vectors
-        cpu_utilization: CPU utilization percent
-
-    Returns:
-        ResourceMetrics dataclass
     """
     return ResourceMetrics(
         index_build_time_sec=build_time_sec,
@@ -228,6 +134,6 @@ def compute_all_resource_metrics(
         disk_bytes=disk_bytes,
         ram_bytes_peak=ram_bytes_peak,
         ram_bytes_steady=ram_bytes_steady,
-        bytes_per_vector=index_size_bytes / max(num_vectors, 1),
+        bytes_per_vector=index_size_bytes / max(num_vectors, 1) if index_size_bytes else 0,
         cpu_utilization_percent=cpu_utilization,
     )
