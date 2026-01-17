@@ -116,10 +116,7 @@ class BenchmarkRunner:
                         result = self._run_single_benchmark(db_name, dataset, index_configs)
                         results.append(result)
                         self._print_summary(result)
-                        
-                        # Save intermediate results
-                        self.save_results()
-                        
+
                     except Exception as e:
                         logger.error(f"Benchmark failed for {db_name}: {e}")
                         console.print(f"[red]Error: {e}[/red]")
@@ -243,6 +240,8 @@ class BenchmarkRunner:
                 # Get index stats
                 stats = db.get_index_stats()
                 build_metrics.index_size_bytes = stats.get("index_size_bytes", 0)
+                if len(vectors) > 0:
+                    build_metrics.bytes_per_vector = build_metrics.index_size_bytes / len(vectors)
 
                 # 2. Run Searches (Many)
                 runs = []
