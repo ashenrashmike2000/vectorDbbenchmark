@@ -58,15 +58,15 @@ def cleanup_host_volumes():
         except Exception as e:
             print(f"⚠️ Warning: Could not delete volumes: {e}")
 
-def cleanup_results_csv():
-    """Deletes the main results.csv to prevent schema conflicts."""
-    csv_path = os.path.join(PROJECT_ROOT, "results", "results.csv")
-    if os.path.exists(csv_path):
-        print(f"🧹 Deleting old results.csv file...")
+def cleanup_results():
+    """Deletes the entire results directory to ensure a fresh run."""
+    results_path = os.path.join(PROJECT_ROOT, "results")
+    if os.path.exists(results_path):
+        print(f"🧹 Deleting old results directory: {results_path}...")
         try:
-            os.remove(csv_path)
+            shutil.rmtree(results_path)
         except Exception as e:
-            print(f"⚠️ Warning: Could not delete results.csv: {e}")
+            print(f"⚠️ Warning: Could not delete results directory: {e}")
 
 
 def wait_for_port(port, timeout=60):
@@ -145,7 +145,7 @@ def main():
     for db, file in DOCKER_MAP.items():
         if file and os.path.exists(file): run_command_simple(f"docker-compose -f \"{file}\" down -v")
     cleanup_host_volumes()
-    cleanup_results_csv()
+    cleanup_results() # <-- FIX: Delete old results directory
 
     try:
         for db in target_databases:

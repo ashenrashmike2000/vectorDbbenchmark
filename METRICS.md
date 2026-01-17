@@ -60,12 +60,12 @@ These metrics evaluate how "correct" the search results are compared to a pre-co
 ### **Cold Start Latency (ms)**
 
 *   **Definition**: The latency of the very first query after an index is loaded, before any caches are warmed up.
-*   **Note**: This metric is not measured in the default benchmark run, which focuses on "warm" performance.
+*   **Note**: This metric is measured once per index build.
 
 ### **Warmup Time (ms)**
 
-*   **Definition**: The time or number of queries required for the database's query latency to stabilize.
-*   **Note**: This metric is not measured in the default benchmark run.
+*   **Definition**: The time it takes for the database's query latency to stabilize after starting.
+*   **Note**: This metric is measured once per index build.
 
 ---
 
