@@ -80,21 +80,21 @@ pip install -r requirements.txt
 ## Quick Start
 
 ### 1. Download a Dataset
-The benchmark runner will automatically download datasets if they are not found. However, you can also pre-download them:
+The benchmark runner will automatically download datasets if they are not found. However, you can also pre-download them using the `download` command:
 ```bash
-python scripts/run_benchmark.py --dataset sift1m --download-only
+python -m src.cli download --dataset sift1m
 ```
 
 ### 2. Run a Full Benchmark
-Use the `auto_benchmark.py` script to run multiple databases and datasets. This script ensures all results are compiled correctly before generating the final plots.
+Use the `run` command to execute benchmarks on one or more databases and datasets.
 
 ```bash
 # Example: Compare FAISS and Milvus on two datasets
-python scripts/auto_benchmark.py \
+python -m src.cli run \
     --database faiss milvus \
     --dataset random msmarco \
     --runs 3 \
-    --export json csv latex plots
+    --output ./results
 ```
 
 ## Configuration
