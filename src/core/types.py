@@ -289,13 +289,13 @@ class ResourceMetrics:
         return {
             "index_build_time_sec": self.index_build_time_sec,
             "index_size_bytes": self.index_size_bytes,
-            "index_size_mb": self.index_size_bytes / (1024 * 1024),
+            "index_size_mb": self.index_size_bytes / (1024 * 1024) if self.index_size_bytes else 0,
             "disk_bytes": self.disk_bytes,
-            "disk_mb": self.disk_bytes / (1024 * 1024),
+            "disk_mb": self.disk_bytes / (1024 * 1024) if self.disk_bytes else 0,
             "ram_bytes_peak": self.ram_bytes_peak,
-            "ram_mb_peak": self.ram_bytes_peak / (1024 * 1024),
+            "ram_mb_peak": self.ram_bytes_peak / (1024 * 1024) if self.ram_bytes_peak else 0,
             "ram_bytes_steady": self.ram_bytes_steady,
-            "ram_mb_steady": self.ram_bytes_steady / (1024 * 1024),
+            "ram_mb_steady": self.ram_bytes_steady / (1024 * 1024) if self.ram_bytes_steady else 0,
             "bytes_per_vector": self.bytes_per_vector,
             "cpu_utilization_percent": self.cpu_utilization_percent,
         }

@@ -23,13 +23,14 @@ from src.metrics.performance import (
     compute_latency_percentiles,
     compute_qps,
     compute_throughput,
+    measure_coldstart_latency,
+    measure_warmup_time,
     compute_all_performance_metrics,
 )
 
 from src.metrics.resource import (
     measure_memory_usage,
     measure_disk_usage,
-    measure_cpu_usage,
     compute_all_resource_metrics,
 )
 
@@ -45,9 +46,10 @@ __all__ = [
     "compute_latency_percentiles",
     "compute_qps",
     "compute_throughput",
+    "measure_coldstart_latency",
+    "measure_warmup_time",
     "compute_all_performance_metrics",
     "measure_memory_usage",
     "measure_disk_usage",
-    "measure_cpu_usage",
     "compute_all_resource_metrics",
 ]

@@ -236,8 +236,11 @@ class WeaviateAdapter(VectorDBInterface):
             # Use aggregation to get total count
             agg = self._collection.aggregate.over_all(total_count=True)
             stats["num_vectors"] = agg.total_count
+            # Estimate size
+            stats["index_size_bytes"] = agg.total_count * self._dimensions * 4 # float32
         except Exception:
             stats["num_vectors"] = 0
+            stats["index_size_bytes"] = 0
             
         return stats
 

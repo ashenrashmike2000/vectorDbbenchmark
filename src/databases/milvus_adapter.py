@@ -4,6 +4,7 @@ Milvus vector database adapter.
 
 import time
 import uuid
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -35,6 +36,7 @@ try:
 except ImportError:
     MILVUS_AVAILABLE = False
 
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="pymilvus")
 
 @register_database("milvus")
 class MilvusAdapter(VectorDBInterface):
@@ -62,7 +64,6 @@ class MilvusAdapter(VectorDBInterface):
             language="Go/C++",
             license="Apache-2.0",
             supported_metrics=[DistanceMetric.L2, DistanceMetric.COSINE, DistanceMetric.IP],
-            # FIX: Removed IndexType.IVF_FLAT to prevent AttributeError
             supported_index_types=[IndexType.HNSW],
             supports_filtering=True,
             supports_hybrid_search=False,
@@ -131,7 +132,6 @@ class MilvusAdapter(VectorDBInterface):
         insert_ids = ids if ids is not None else list(range(n_vectors))
         batch_size = 10000
 
-        # Batch insert to prevent gRPC error (StatusCode.RESOURCE_EXHAUSTED)
         for i in range(0, n_vectors, batch_size):
             end = i + batch_size
             batch_ids = insert_ids[i:end]
@@ -149,7 +149,6 @@ class MilvusAdapter(VectorDBInterface):
             DistanceMetric.IP: "IP"
         }
 
-        # Handle Index Type Robustly
         idx_type_str = "HNSW"
         if hasattr(index_config.type, "name"):
              idx_type_str = index_config.type.name
@@ -207,36 +206,22 @@ class MilvusAdapter(VectorDBInterface):
         }
         current_metric = metric_map.get(self._distance_metric, "L2")
 
-        # --- FIX START: Detect Index Type & Set Correct Params ---
         if not search_params:
-            # Default params based on common Index Types
-            # HNSW needs 'ef', IVF needs 'nprobe'
-            index_type_guess = "HNSW"  # Default to HNSW as per your info config
-
-            # Try to infer from internal config if available
+            index_type_guess = "HNSW"
             if hasattr(self, "_index_config") and self._index_config:
                 if hasattr(self._index_config.type, "name"):
                     index_type_guess = self._index_config.type.name
                 elif isinstance(self._index_config.type, str):
                     index_type_guess = self._index_config.type
 
-            search_params = {
-                "metric_type": current_metric,
-                "params": {}
-            }
-
+            search_params = {"metric_type": current_metric, "params": {}}
             if "HNSW" in str(index_type_guess).upper():
-                # 'ef' controls search accuracy/speed for HNSW
-                # ef should be >= k (top_k)
                 search_params["params"] = {"ef": max(k * 2, 64)}
             else:
-                # Default to IVF params
                 search_params["params"] = {"nprobe": 10}
         else:
-            # Ensure metric_type is set even if user provided other params
             if "metric_type" not in search_params:
                 search_params["metric_type"] = current_metric
-        # --- FIX END ---
 
         latencies = []
         all_indices = []
@@ -244,7 +229,6 @@ class MilvusAdapter(VectorDBInterface):
 
         for query in queries:
             start_q = time.perf_counter()
-
             res = self._collection.search(
                 data=[query],
                 anns_field="vector",
@@ -252,9 +236,7 @@ class MilvusAdapter(VectorDBInterface):
                 limit=k,
                 expr=None
             )
-
             latencies.append((time.perf_counter() - start_q) * 1000)
-
             hits = res[0]
             all_indices.append(hits.ids)
             all_distances.append(hits.distances)
@@ -265,7 +247,6 @@ class MilvusAdapter(VectorDBInterface):
             latencies
         )
 
-    # CRUD Stubs
     def insert(self, vectors: NDArray[np.float32], metadata=None, ids=None) -> float:
         if ids is None: ids = list(range(self._num_vectors, self._num_vectors + len(vectors)))
         start = time.perf_counter()
@@ -286,22 +267,39 @@ class MilvusAdapter(VectorDBInterface):
     def get_index_stats(self) -> Dict[str, Any]:
         if not self._collection: return {}
         
-        stats = {
-            "num_vectors": self._collection.num_entities,
-            "dimensions": self._dimensions
-        }
-        
-        # Try to get memory usage
+        self._collection.flush()
+        num_vectors = self._collection.num_entities
+        total_size = 0
+
+        # Try modern .stats() method first
         try:
-            # This returns a list of SegmentInfo
-            segments = utility.get_query_segment_info(self._collection_name)
-            total_mem_size = sum([s.mem_size for s in segments])
-            stats["index_size_bytes"] = total_mem_size
-        except Exception as e:
-            # Fallback or log
-            pass
-            
-        return stats
+            stats = self._collection.stats()
+            if "partitions_stats" in stats:
+                for partition in stats["partitions_stats"]:
+                    if "segments_stats" in partition:
+                        for segment in partition["segments_stats"]:
+                            total_size += int(segment.get("data_size", 0))
+        except (MilvusException, AttributeError):
+            total_size = 0 # Reset size if first method fails
+
+        # If .stats() fails or returns 0, try older segment info method
+        if total_size == 0:
+            try:
+                segments_info = utility.get_query_segment_info(self._collection_name)
+                total_size = sum(segment.mem_size for segment in segments_info)
+            except (MilvusException, AttributeError):
+                total_size = 0 # Reset size if second method also fails
+
+        # If all API calls fail, fall back to estimation
+        if total_size == 0 and num_vectors > 0:
+            print(f"⚠️ Milvus: Could not get detailed stats via API. Falling back to estimation.")
+            total_size = num_vectors * self._dimensions * 4  # float32
+
+        return {
+            "num_vectors": num_vectors,
+            "dimensions": self._dimensions,
+            "index_size_bytes": total_size
+        }
 
     def set_search_params(self, params: Dict[str, Any]) -> None:
         self._search_params = params
@@ -309,27 +307,13 @@ class MilvusAdapter(VectorDBInterface):
     def get_search_params(self) -> Dict[str, Any]:
         return self._search_params
 
-    # === NEW: Single-Item Wrappers for Benchmarking ===
-
     def insert_one(self, id: str, vector: np.ndarray):
-        """Inserts a single vector."""
-        # Milvus expects lists of lists: [[id], [vector]]
-        try:
-            int_id = int(id) if str(id).isdigit() else 999999
-            self._collection.insert([[int_id], [vector]])
-        except Exception as e:
-            print(f"Milvus insert_one failed: {e}")
-
-    def delete_one(self, id: str):
-        """Deletes a single vector."""
-        try:
-            int_id = int(id) if str(id).isdigit() else 999999
-            expr = f"id in [{int_id}]"
-            self._collection.delete(expr)
-        except Exception:
-            pass
+        # Milvus requires int64 for primary key. If ID is not int, hash it.
+        milvus_id = int(id) if str(id).isdigit() else hash(id) % (2**63 - 1)
+        self._collection.insert([[milvus_id], [vector]])
+        self._collection.flush()
 
     def update_one(self, id: str, vector: np.ndarray):
-        """Updates a single vector (Delete + Insert)."""
-        self.delete_one(id)
-        self.insert_one(id, vector)
+        milvus_id = int(id) if str(id).isdigit() else hash(id) % (2**63 - 1)
+        expr = f"id in [{milvus_id}]"
+        self._collection.delete(expr)
