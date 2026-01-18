@@ -19,3 +19,4 @@ coloredlogs
 python-dotenv
 sentence-transformers
 scipy
+psutil
