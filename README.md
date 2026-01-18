@@ -241,7 +241,11 @@ RAGdbEval/
 
 ## Methodology
 
-This framework follows established academic and industry standards for vector search benchmarking, ensuring that results are reproducible, comparable, and statistically sound. For detailed metric definitions, see `METRICS.md`.
+This framework follows established benchmarking methodologies:
+
+1. **ANN-Benchmarks** - Standard for algorithm-level comparison
+2. **VectorDBBench** - Production-realistic database benchmarking
+3. **Big-ANN-Benchmarks** - NeurIPS competition methodology
 
 ### Key Principles
 
@@ -255,15 +259,17 @@ This framework follows established academic and industry standards for vector se
 ### Adding a New Database
 
 1. Create an adapter in `src/databases/newdb_adapter.py`.
-2. Inherit from `VectorDBInterface` and implement the required methods.
-3. Register your adapter using `@register_database("newdb")`.
-4. Create a configuration file in `config/databases/newdb.yaml`.
+2. Inherit from `VectorDBInterface`.
+3. Implement the required methods.
+4. Register your adapter using `@register_database("newdb")`.
+5. Create a configuration file in `config/databases/newdb.yaml`.
 
 ### Adding a New Dataset
 
 1. Create a loader in `src/datasets/newdata.py`.
-2. Inherit from `DatasetLoader` and implement the loading logic.
-3. Create a configuration file in `config/datasets/newdata.yaml`.
+2. Inherit from `DatasetLoader`.
+3. Implement `load_vectors`, `load_queries`, and `load_ground_truth`.
+4. Create a configuration file in `config/datasets/newdata.yaml`.
 
 ## Citation
 
