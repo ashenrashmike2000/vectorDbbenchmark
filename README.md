@@ -90,11 +90,12 @@ Use the `run` command to execute benchmarks on one or more databases and dataset
 
 ```bash
 # Example: Compare FAISS and Milvus on two datasets
-python -m src.cli run \
+python scripts/auto_benchmark.py \
     --database faiss milvus \
     --dataset random msmarco \
     --runs 3 \
-    --output ./results
+    --export json csv latex plots
+# Use ` instead of \ in windows powershell
 ```
 
 ## Configuration
