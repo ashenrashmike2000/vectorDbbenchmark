@@ -317,3 +317,11 @@ class MilvusAdapter(VectorDBInterface):
         milvus_id = int(id) if str(id).isdigit() else hash(id) % (2**63 - 1)
         expr = f"id in [{milvus_id}]"
         self._collection.delete(expr)
+        self._collection.flush()
+        self.insert_one(id, vector)
+
+    def delete_one(self, id: str):
+        milvus_id = int(id) if str(id).isdigit() else hash(id) % (2**63 - 1)
+        expr = f"id in [{milvus_id}]"
+        self._collection.delete(expr)
+        self._collection.flush()
