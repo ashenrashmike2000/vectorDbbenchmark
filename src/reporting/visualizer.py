@@ -116,17 +116,23 @@ class BenchmarkVisualizer:
         
         ax = sns.barplot(data=df, x=x, y=y, hue=hue, palette=palette)
         
-        # Add labels to each bar, but only if there are not too many bars
-        if len(df) < 30:
-            for container in ax.containers:
-                ax.bar_label(container, fmt='%.2f', padding=3, rotation=45, fontsize=8)
+        # Add labels to each bar
+        for container in ax.containers:
+            # Use a slightly more intelligent formatting
+            labels = [f'{v.get_height():.2f}' if v.get_height() > 0.1 else f'{v.get_height():.4f}' for v in container]
+            # Set rotation to 90 for vertical text
+            ax.bar_label(container, labels=labels, padding=3, rotation=90, fontsize=9)
             
         plt.title(title, fontsize=16, weight='bold')
         plt.xlabel(None)
         plt.ylabel(y, fontsize=12)
         plt.xticks(rotation=0) # No rotation needed for database names
         plt.legend(title=hue, bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        # Adjust top margin to make space for vertical labels
+        plt.margins(y=0.1)
         plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust layout to make room for legend
+
         plt.savefig(filename, dpi=self.dpi, bbox_inches="tight")
         plt.close()
         return str(filename)
